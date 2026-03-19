@@ -9,9 +9,6 @@ from typing import Optional, List
 import numpy as np
 import sounddevice as sd
 
-#TEST: python3 Test2.py -d 2 -t -25 -s 5 --pause 7 --gate-db -40
-#Byt ut -d "x" för byte av mikrofon
-
 
 def int_or_str(text: str):
     try:

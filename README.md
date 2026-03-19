@@ -1,21 +1,57 @@
-How to run the main.py file
+# Running the Program
 
-1. Select microhone
-List available device microphones:
-python3 Test2.py -l
+## 1. List available microphones
 
-2. Main loop 
-Start the main loop:
-python3 Test2.py -d 2 -t -25 -s 5 --pause 7
+Before starting the program, check which microphone devices are available:
 
-Stop the main loop:
-crtl + c
+```bash
+python3 main.py -l
+```
 
-Mandatory parameters:
--d selects microphone
--t is the decible threshhold in (dBFS, computer meassured dB)
--s how long the input will be measured (seconds)
---pause how long the output will be diplayed before next measurement can be done (seconds)
+## 2. Start the main loop
 
-Additional parameter:
---gate-db while recording input, only dBFS above this value will be registered to avoid noise being picked up (dBFS)
+Run the main loop with:
+
+```bash
+python3 main.py -d 2 -t -25 -s 5 --pause 7
+```
+
+To stop the program, press:
+
+```text
+Ctrl + C
+```
+
+## Parameters
+
+### Required parameters
+
+- `-d`  
+  Selects which microphone device to use.
+
+- `-t`  
+  Sets the decibel threshold in dBFS.
+
+- `-s`  
+  Sets how long the input is measured, in seconds.
+
+- `--pause`  
+  Sets how long the result is displayed before the next measurement starts, in seconds.
+
+### Optional parameters
+
+- `--gate-db`  
+  While recording input, only dBFS values above this threshold will be registered.  
+  This helps reduce background noise.
+
+## Example
+
+```bash
+python3 main.py -d 2 -t -25 -s 5 --pause 7
+```
+
+This example:
+- uses microphone device `2`
+- sets the threshold to `-25 dBFS`
+- measures input for `5` seconds
+- waits `7` seconds before allowing the next measurement

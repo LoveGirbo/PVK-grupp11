@@ -82,7 +82,7 @@ def main():
     args = parser.parse_args()
 
     if args.list_devices:
-        print(sd.query_devices())
+        print(sd.query_devices()) # Returns available listening devices
         return
 
     if args.samplerate is None:

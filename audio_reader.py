@@ -1,0 +1,129 @@
+import threading
+from typing import Optional
+
+import numpy as np
+import sounddevice as sd
+
+
+def rms_dbfs(x: np.ndarray) -> float:
+    rms = float(np.sqrt(np.mean(x * x)))
+    return 20.0 * np.log10(rms + 1e-12)
+
+
+def next_pow2(n: int) -> int:
+    p = 1
+    while p < n:
+        p <<= 1
+    return p
+
+
+def dominant_freq_hz(block: np.ndarray, samplerate: int, nfft: Optional[int], min_hz: float) -> float:
+    x = block.astype(np.float64, copy=False)
+    x = x - np.mean(x)
+
+    N = len(x)
+    if N < 8:
+        return float("nan")
+
+    if nfft is None:
+        nfft = next_pow2(N)
+
+    window = np.hanning(N)
+    X = np.fft.rfft(x * window, n=nfft)
+    mag = np.abs(X)
+    freqs = np.fft.rfftfreq(nfft, d=1.0 / samplerate)
+
+    valid = freqs >= max(min_hz, 1e-9)
+    mag = mag[valid]
+    freqs = freqs[valid]
+
+    if mag.size == 0 or np.all(mag == 0):
+        return float("nan")
+
+    return float(freqs[int(np.argmax(mag))])
+
+
+class SoundReader:
+    def __init__(
+        self,
+        device=None,
+        channels: int = 1,
+        samplerate: Optional[float] = None,
+        blocksize: int = 1024,
+        gate_db: float = -40.0,
+        min_hz: float = 20.0,
+        fftsize: int = 0,
+    ):
+        self.device = device
+        self.channels = channels
+        self.blocksize = blocksize
+        self.gate_db = gate_db
+        self.min_hz = min_hz
+        self.nfft = None if fftsize <= 0 else int(fftsize)
+
+        if samplerate is None:
+            info = sd.query_devices(device, "input")
+            samplerate = info["default_samplerate"]
+
+        self.samplerate = int(samplerate)
+
+        self.lock = threading.Lock()
+        self.active = False
+        self.latest_frequency: Optional[float] = None
+        self.latest_db: Optional[float] = None
+
+        self.stream = sd.InputStream(
+            device=self.device,
+            channels=self.channels,
+            samplerate=self.samplerate,
+            blocksize=self.blocksize,
+            callback=self._audio_callback,
+        )
+
+    def start(self):
+        self.stream.start()
+
+    def stop(self):
+        if self.stream.active:
+            self.stream.stop()
+        self.stream.close()
+
+    def start_listening(self):
+        with self.lock:
+            self.active = True
+
+    def stop_listening(self):
+        with self.lock:
+            self.active = False
+            self.latest_frequency = None
+            self.latest_db = None
+
+    def get_latest_frequency(self) -> Optional[float]:
+        with self.lock:
+            return self.latest_frequency
+
+    def _audio_callback(self, indata, frames, time_info, status):
+        mono = np.mean(indata, axis=1).copy()
+        level_db = rms_dbfs(mono)
+
+        with self.lock:
+            if not self.active:
+                return
+
+            self.latest_db = level_db
+
+            if level_db < self.gate_db:
+                self.latest_frequency = None
+                return
+
+            freq = dominant_freq_hz(
+                mono,
+                samplerate=self.samplerate,
+                nfft=self.nfft,
+                min_hz=self.min_hz,
+            )
+
+            if np.isnan(freq):
+                self.latest_frequency = None
+            else:
+                self.latest_frequency = float(freq)

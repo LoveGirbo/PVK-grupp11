@@ -13,14 +13,17 @@ screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Frequency game")
 
 # Load images
-# background = pygame.image.load("images/Background.jpg")
+background = pygame.image.load("images/Background.jpg")
 
 class Player_class(pygame.sprite.Sprite):
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.image.load("images/Player_sprite.png")
         self.rect = self.image.get_rect()
-        self.rect.center = x, y
+        self.rect.center = [x, y]
+
+    def update(self):
+        self.rect.y += 1
 
 player_group = pygame.sprite.Group()
 player1 = Player_class(int(screen_width/2), int(screen_height/2))
@@ -31,8 +34,10 @@ while run:
 
     clock.tick(fps)
 
-    # screen.blit(background, (0, 0))
+    screen.blit(background, (0, 0))
+    player_group.update()
     player_group.draw(screen)
+
 
 
 

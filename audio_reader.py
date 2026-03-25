@@ -1,8 +1,27 @@
+# audio_reader.py
 import threading
 from typing import Optional
 
 import numpy as np
 import sounddevice as sd
+
+
+def list_input_devices():
+    devices = sd.query_devices()
+    microphones = []
+
+    for index, info in enumerate(devices):
+        if int(info["max_input_channels"]) > 0:
+            microphones.append(
+                {
+                    "index": index,
+                    "name": str(info["name"]),
+                    "max_input_channels": int(info["max_input_channels"]),
+                    "default_samplerate": int(info["default_samplerate"]),
+                }
+            )
+
+    return microphones
 
 
 def rms_dbfs(x: np.ndarray) -> float:
@@ -17,30 +36,35 @@ def next_pow2(n: int) -> int:
     return p
 
 
-def dominant_freq_hz(block: np.ndarray, samplerate: int, nfft: Optional[int], min_hz: float) -> float:
+def dominant_freq_hz(
+    block: np.ndarray,
+    samplerate: int,
+    nfft: Optional[int],
+    min_hz: float,
+) -> float:
     x = block.astype(np.float64, copy=False)
     x = x - np.mean(x)
 
-    N = len(x)
-    if N < 8:
+    n_samples = len(x)
+    if n_samples < 8:
         return float("nan")
 
     if nfft is None:
-        nfft = next_pow2(N)
+        nfft = next_pow2(n_samples)
 
-    window = np.hanning(N)
-    X = np.fft.rfft(x * window, n=nfft)
-    mag = np.abs(X)
+    window = np.hanning(n_samples)
+    spectrum = np.fft.rfft(x * window, n=nfft)
+    magnitude = np.abs(spectrum)
     freqs = np.fft.rfftfreq(nfft, d=1.0 / samplerate)
 
     valid = freqs >= max(min_hz, 1e-9)
-    mag = mag[valid]
+    magnitude = magnitude[valid]
     freqs = freqs[valid]
 
-    if mag.size == 0 or np.all(mag == 0):
+    if magnitude.size == 0 or np.all(magnitude == 0):
         return float("nan")
 
-    return float(freqs[int(np.argmax(mag))])
+    return float(freqs[int(np.argmax(magnitude))])
 
 
 class SoundReader:
@@ -91,6 +115,8 @@ class SoundReader:
     def start_listening(self):
         with self.lock:
             self.active = True
+            self.latest_frequency = None
+            self.latest_db = None
 
     def stop_listening(self):
         with self.lock:
@@ -101,6 +127,10 @@ class SoundReader:
     def get_latest_frequency(self) -> Optional[float]:
         with self.lock:
             return self.latest_frequency
+
+    def get_latest_db(self) -> Optional[float]:
+        with self.lock:
+            return self.latest_db
 
     def _audio_callback(self, indata, frames, time_info, status):
         mono = np.mean(indata, axis=1).copy()

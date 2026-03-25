@@ -3,8 +3,8 @@ import pygame
 from audio_reader import list_input_devices
 
 
-SCREEN_WIDTH = 900
-SCREEN_HEIGHT = 650
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
 FPS = 60
 
 BG_COLOR = (20, 24, 32)

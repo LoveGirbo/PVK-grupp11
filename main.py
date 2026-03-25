@@ -4,8 +4,8 @@ from menu import choose_microphone
 from game import run_game
 
 
-SCREEN_WIDTH = 900
-SCREEN_HEIGHT = 650
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
 
 
 def main() -> None:

@@ -3,13 +3,15 @@ import pygame
 
 from audio_reader import SoundReader
 
-
-SCREEN_WIDTH = 900
-SCREEN_HEIGHT = 650
+# Variables
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
 FPS = 60
 
 TEXT_COLOR = (235, 235, 235)
 
+background_path = "" # Add background here
+player_path = "images/Player_sprite.png" # Add player sprite here
 
 def load_image_or_fallback(
     path: str,
@@ -54,8 +56,8 @@ class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
         self.image = load_image_or_fallback(
-            "images/Player_sprite.png",
-            (80, 80),
+            player_path,
+            (10, 10),
             (220, 80, 80),
         )
         self.rect = self.image.get_rect(center=(x, y))
@@ -71,13 +73,13 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     pygame.display.set_caption(f"Frequency game - {microphone['name']}")
 
     background = load_image_or_fallback(
-        "images/Background.jpg",
+        background_path,
         (SCREEN_WIDTH, SCREEN_HEIGHT),
         (45, 60, 90),
     )
 
     player_group = pygame.sprite.Group()
-    player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    player = Player(int(SCREEN_WIDTH / 2), int(SCREEN_HEIGHT / 2))
     player_group.add(player)
 
     audio = SoundReader(
@@ -86,8 +88,8 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
         min_hz=20.0,
     )
 
-    title_font = pygame.font.Font(None, 36)
-    info_font = pygame.font.Font(None, 30)
+    title_font = pygame.font.Font(None, 16)
+    info_font = pygame.font.Font(None, 16)
 
     try:
         audio.start()
@@ -114,13 +116,9 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             screen.blit(background, (0, 0))
             player_group.draw(screen)
 
-            draw_text(screen, f"Microphone: {microphone['name']}", title_font, TEXT_COLOR, 20, 20)
-            draw_text(screen, "ESC = back to microphone menu", info_font, TEXT_COLOR, 20, 55)
+            draw_text(screen, f"Microphone: {microphone['name']}", title_font, TEXT_COLOR, 20, 45)
+            draw_text(screen, "ESC = back to microphone menu", info_font, TEXT_COLOR, 20, 20)
 
-            if current_frequency is None:
-                draw_text(screen, "Current frequency: None", info_font, TEXT_COLOR, 20, 90)
-            else:
-                draw_text(screen, f"Current frequency: {current_frequency:.1f} Hz", info_font, TEXT_COLOR, 20, 90)
 
             pygame.display.flip()
 

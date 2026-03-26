@@ -7,7 +7,7 @@ from audio_reader import SoundReader
 # Screen
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
-FPS = 60
+FPS = 240
 background_path = "" # Add background here
 TEXT_COLOR = (235, 235, 235)
 
@@ -16,6 +16,7 @@ movement_smoothing = 30 # Higher value equals smoother movement
 player_path = "" # Add player sprite here
 player_size = 20
 player_colour = (240, 240, 20)
+ticks_until_invisible = 40
 
 # Sound
 minimum_frequency = 150.0
@@ -57,7 +58,7 @@ def freq_to_y(freq: float) -> int:
     elif freq > maximum_frequency:
         freq = maximum_frequency
 
-    return int((freq - minimum_frequency) * (SCREEN_HEIGHT / freq_range))
+    return int(SCREEN_HEIGHT - ((freq - minimum_frequency) * (SCREEN_HEIGHT / freq_range)))
 
 
 class Player(pygame.sprite.Sprite):
@@ -95,10 +96,9 @@ class PlayerGlow(pygame.sprite.Sprite):
         self.x = float(x)
         self.y = float(y)
 
-        self.life = 15
-        self.max_life = 15
+        self.life = 200
+        self.max_life = 200
         self.scale = 1.0
-        self.alpha = 200
 
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
@@ -106,18 +106,10 @@ class PlayerGlow(pygame.sprite.Sprite):
     def update(self, player_y: float) -> None:
         self.x -= 3
 
-        # Låt glowet följa spelarens y mjukt istället för att "snappa"
-        self.y += (player_y - self.y) * 0.15
-
         # Krymp långsamt
-        self.scale *= 0.94
-        new_size = max(2, int(self.base_size * self.scale))
-
-        self.image = pygame.transform.smoothscale(self.base_image, (new_size, new_size))
-
-        # Fade baserat på återstående liv
-        self.alpha = int(120 * (self.life / self.max_life))
-        self.image.set_alpha(self.alpha)
+        # self.scale *= 0.995
+        # new_size = max(2, int(self.base_size * self.scale))
+        # self.image = pygame.transform.smoothscale(self.base_image, (new_size, new_size))
 
         self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
 
@@ -153,6 +145,9 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     title_font = pygame.font.Font(None, 16)
     info_font = pygame.font.Font(None, 16)
 
+    none_ticks = 0
+    player_visible = True
+
     try:
         audio.start()
         audio.start_listening()
@@ -170,13 +165,33 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
             current_frequency = audio.get_latest_frequency()
 
-            if current_frequency is not None:
-                player_group.update(freq_to_y(current_frequency))
-            else:
-                player_group.update(SCREEN_HEIGHT / 2)
+            if current_frequency is None:
+                none_ticks += 1
 
-            player_glow = PlayerGlow(int(SCREEN_WIDTH / 2), int(player.rect.y + player.rect.height/2))
-            player_glow_group.add(player_glow)
+                player_group.update(SCREEN_HEIGHT // 2)
+
+                if none_ticks >= ticks_until_invisible and player_visible:
+                    player_group.remove(player)
+                    player_glow_group.remove(player_glow)
+                    player_visible = False
+
+            else:
+                none_ticks = 0
+
+                if not player_visible:
+                    player_group.add(player)
+                    player_visible = True
+
+                player.update(freq_to_y(current_frequency))
+
+
+
+            if player_visible:
+                player_glow = PlayerGlow(
+                    int(SCREEN_WIDTH / 2),
+                    int(player.rect.y + player.rect.height / 2)
+                )
+                player_glow_group.add(player_glow)
 
             player_glow_group.update(player.rect.y)
             screen.blit(background, (0, 0))

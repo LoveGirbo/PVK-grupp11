@@ -4,14 +4,24 @@ import pygame
 from audio_reader import SoundReader
 
 # Variables
+# Screen
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 FPS = 60
-
+background_path = "" # Add background here
 TEXT_COLOR = (235, 235, 235)
 
-background_path = "" # Add background here
-player_path = "images/Player_sprite.png" # Add player sprite here
+# Player
+movement_smoothing = 30 # Higher value equals smoother movement
+player_path = "" # Add player sprite here
+player_size = 20
+player_colour = (240, 240, 20)
+
+# Sound
+minimum_frequency = 150.0
+maximum_frequency = 500.0
+dB_threshold = 40.0
+
 
 def load_image_or_fallback(
     path: str,
@@ -40,33 +50,83 @@ def draw_text(
 
 
 def freq_to_y(freq: float) -> int:
-    freq_min = 80.0
-    freq_max = 800.0
-    freq_range = freq_max - freq_min
+    freq_range = maximum_frequency - minimum_frequency
 
-    if freq < freq_min:
-        freq = freq_min
-    elif freq > freq_max:
-        freq = freq_max
+    if freq < minimum_frequency:
+        freq = minimum_frequency
+    elif freq > maximum_frequency:
+        freq = maximum_frequency
 
-    return int((freq - freq_min) * (SCREEN_HEIGHT / freq_range))
+    return int((freq - minimum_frequency) * (SCREEN_HEIGHT / freq_range))
 
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
-        self.image = load_image_or_fallback(
-            player_path,
-            (10, 10),
-            (220, 80, 80),
+        self.image = pygame.Surface((player_size, player_size), pygame.SRCALPHA)
+        pygame.draw.circle(
+            self.image,
+            player_colour,
+            (player_size // 2, player_size // 2),
+            player_size // 2
         )
         self.rect = self.image.get_rect(center=(x, y))
         self.y = float(self.rect.y)
 
     def update(self, new_y: float) -> None:
-        speed = 0.08
+        speed = 1/movement_smoothing
         self.y += (new_y - self.y) * speed
-        self.rect.y = int(self.y)
+        self.rect.y = round(self.y)
+
+class PlayerGlow(pygame.sprite.Sprite):
+    def __init__(self, x: float, y: float):
+        super().__init__()
+
+        self.base_size = player_size
+        self.base_image = pygame.Surface((self.base_size, self.base_size), pygame.SRCALPHA)
+
+        pygame.draw.circle(
+            self.base_image,
+            (*player_colour, 200),
+            (self.base_size // 2, self.base_size // 2),
+            self.base_size // 2
+        )
+
+        self.x = float(x)
+        self.y = float(y)
+
+        self.life = 15
+        self.max_life = 15
+        self.scale = 1.0
+        self.alpha = 200
+
+        self.image = self.base_image.copy()
+        self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
+
+    def update(self, player_y: float) -> None:
+        self.x -= 3
+
+        # Låt glowet följa spelarens y mjukt istället för att "snappa"
+        self.y += (player_y - self.y) * 0.15
+
+        # Krymp långsamt
+        self.scale *= 0.94
+        new_size = max(2, int(self.base_size * self.scale))
+
+        self.image = pygame.transform.smoothscale(self.base_image, (new_size, new_size))
+
+        # Fade baserat på återstående liv
+        self.alpha = int(120 * (self.life / self.max_life))
+        self.image.set_alpha(self.alpha)
+
+        self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
+
+        self.life -= 1
+        if self.life <= 0:
+            self.kill()
+
+
+
 
 
 def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bool:
@@ -82,9 +142,11 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     player = Player(int(SCREEN_WIDTH / 2), int(SCREEN_HEIGHT / 2))
     player_group.add(player)
 
+    player_glow_group = pygame.sprite.Group()
+
     audio = SoundReader(
         device=microphone["index"],
-        gate_db=-40.0,
+        gate_db=-dB_threshold,
         min_hz=20.0,
     )
 
@@ -113,11 +175,20 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             else:
                 player_group.update(SCREEN_HEIGHT / 2)
 
+            player_glow = PlayerGlow(int(SCREEN_WIDTH / 2), int(player.rect.y + player.rect.height/2))
+            player_glow_group.add(player_glow)
+
+            player_glow_group.update(player.rect.y)
             screen.blit(background, (0, 0))
+            player_glow_group.draw(screen)
             player_group.draw(screen)
 
             draw_text(screen, f"Microphone: {microphone['name']}", title_font, TEXT_COLOR, 20, 45)
             draw_text(screen, "ESC = back to microphone menu", info_font, TEXT_COLOR, 20, 20)
+            if current_frequency is None:
+                draw_text(screen, "Current frequency: None", info_font, TEXT_COLOR, 20, 90)
+            else:
+                draw_text(screen, f"Current frequency: {current_frequency:.1f} Hz", info_font, TEXT_COLOR, 20, 90)
 
 
             pygame.display.flip()

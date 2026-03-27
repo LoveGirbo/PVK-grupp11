@@ -1,9 +1,17 @@
 import os
+import random
 import pygame
 
 from audio_reader import SoundReader
 
 # Variables
+# Game variables
+num_sounds_to_play = 3
+mp3_seconds = 1  # Seconds sound is played for
+between_mp3_seconds = 0.1  # Seconds between mp3 sounds
+pre_game_seconds = 1  # Seconds before game starts
+post_game_seconds = 2  # Seconds after game ends and a new one can start
+
 # Screen
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
@@ -17,20 +25,25 @@ movement_smoothing = 30 # Higher value equals smoother movement
 player_path = "" # Add player sprite here
 player_size = 20
 player_colour = (240, 240, 20)
-ticks_until_invisible = 40
+seconds_until_invisible = 0.1
 
 # Tone bar
 movement_speed = 2
-tone_bar_width = 300
+tone_bar_width = mp3_seconds * FPS * movement_speed
 tone_bar_height = 30
 tone_bar_colour = (0, 204, 255)
 tone_bar_alpha = 150
 
-# Sound
+# Sound input
 minimum_frequency = 150.0
 maximum_frequency = 500.0
 dB_threshold = 50.0 # Higher = lower threshold
 
+# Sound output
+AUDIO_FOLDER = "audio"
+MP3_NAMES = "sound.mp3"
+MP3_FREQUENCIES = [100, 200, 300, 400, 500]
+MP3_DURATION_FRAMES = FPS * 3  # 3 seconds
 
 def load_image_or_fallback(
     path: str,
@@ -68,6 +81,22 @@ def freq_to_y(freq: float) -> int:
 
     return int(SCREEN_HEIGHT - ((freq - minimum_frequency) * (SCREEN_HEIGHT / freq_range)))
 
+def seconds_to_ticks(seconds: float) -> float:
+    return seconds * FPS
+
+def play_mp3(filename: str) -> None:
+    path = os.path.join(AUDIO_FOLDER, filename)
+
+    if not os.path.exists(path):
+        print(f"Missing audio file: {path}")
+        return
+
+    pygame.mixer.music.load(path)
+    pygame.mixer.music.play()
+
+def stop_mp3() -> None:
+    pygame.mixer.music.stop()
+
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
@@ -87,7 +116,7 @@ class Player(pygame.sprite.Sprite):
         self.y += (new_y - self.y) * speed
         self.rect.y = round(self.y)
 
-class PlayerGlow(pygame.sprite.Sprite):
+class PlayerTrail(pygame.sprite.Sprite):
     def __init__(self, x: float, y: float):
         super().__init__()
 
@@ -169,11 +198,14 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
         BACKGROUND_COLOR,
     )
 
+    # Creating sprite groups
+    # Player
     player_group = pygame.sprite.Group()
     player = Player(int(SCREEN_WIDTH / 2), int(SCREEN_HEIGHT / 2))
     player_group.add(player)
 
-    player_glow_group = pygame.sprite.Group()
+    # Trail
+    player_trail_group = pygame.sprite.Group()
 
     tone_bar_group = pygame.sprite.Group()
 
@@ -186,8 +218,20 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     title_font = pygame.font.Font(None, 16)
     info_font = pygame.font.Font(None, 16)
 
-    none_ticks = 0
     player_visible = True
+    game_event_active = False
+
+    # Game delays
+    none_ticks = 0 # Ticks without freq input until player disappears
+    mp3_ticks = 0 # Ticks sound is played for
+    between_mp3_ticks = 0 # Ticks between mp3 sounds
+    pre_game_ticks = 0 # Ticks before game starts
+    post_game_ticks = 0 # Ticks after game start and a new one can start
+
+    ticks_until_invisible = seconds_to_ticks(seconds_until_invisible)
+
+    available_sounds = list(range(len(MP3_FREQUENCIES)))
+    random.shuffle(available_sounds)
 
     try:
         audio.start()
@@ -195,7 +239,9 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
         while True:
             clock.tick(FPS)
+            current_frequency = audio.get_latest_frequency() # Get current frequency
 
+            # Event handler
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return False
@@ -206,17 +252,50 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_SPACE:
-                        tone_bar = ToneBar(300)
-                        tone_bar_group.add(tone_bar)
+                        if not game_event_active:
+                            game_event_active = True
+                            mp3_ticks = seconds_to_ticks(mp3_seconds)
+                            between_mp3_ticks = seconds_to_ticks(between_mp3_seconds)
+                            pre_game_ticks = seconds_to_ticks(pre_game_seconds)
+                            post_game_ticks = seconds_to_ticks(post_game_seconds)
+                            sounds_played = 0
 
-            current_frequency = audio.get_latest_frequency()
+                            available_sounds = list(range(len(MP3_FREQUENCIES)))
+                            random.shuffle(available_sounds)
+
+            # Game loop
+            if game_event_active:
+                if pre_game_ticks > 0:
+                    pre_game_ticks -= 1
+                else:
+                    if mp3_ticks > 0:
+                        if mp3_ticks == seconds_to_ticks(mp3_seconds): # First tick of a new sound
+                            if available_sounds:
+                                random_index = available_sounds.pop()
+                                tone_bar = ToneBar(MP3_FREQUENCIES[random_index])
+                                tone_bar_group.add(tone_bar)
+                        mp3_ticks -= 1
+                    else:
+                        if between_mp3_ticks > 0:
+                            between_mp3_ticks -= 1
+                        else:
+                            if sounds_played < num_sounds_to_play-1:
+                                sounds_played += 1
+                                mp3_ticks = seconds_to_ticks(mp3_seconds)
+                                between_mp3_ticks = seconds_to_ticks(between_mp3_seconds)
+                            else:
+                                if post_game_ticks > 0:
+                                    post_game_ticks -= 1
+                                else:
+                                    game_event_active = False
+
+
 
             if current_frequency is None:
                 none_ticks += 1
 
                 if none_ticks >= ticks_until_invisible and player_visible:
                     player_group.remove(player)
-                    player_glow_group.remove(player_glow)
                     player_visible = False
 
             else:
@@ -231,17 +310,17 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
 
             if player_visible:
-                player_glow = PlayerGlow(
+                player_trail = PlayerTrail(
                     int(SCREEN_WIDTH / 2),
                     int(player.rect.y + player.rect.height / 2)
                 )
-                player_glow_group.add(player_glow)
+                player_trail_group.add(player_trail)
 
-            player_glow_group.update(player.rect.y)
+            player_trail_group.update(player.rect.y)
             tone_bar_group.update()
             screen.blit(background, (0, 0))
             tone_bar_group.draw(screen)
-            player_glow_group.draw(screen)
+            player_trail_group.draw(screen)
             player_group.draw(screen)
 
             draw_text(screen, f"Microphone: {microphone['name']}", title_font, TEXT_COLOR, 20, 45)

@@ -1,4 +1,3 @@
-# audio_reader.py
 import threading
 from typing import Optional
 
@@ -52,6 +51,9 @@ def dominant_freq_hz(
     if nfft is None:
         nfft = next_pow2(n_samples)
 
+    if nfft < n_samples:
+        nfft = next_pow2(n_samples)
+
     window = np.hanning(n_samples)
     spectrum = np.fft.rfft(x * window, n=nfft)
     magnitude = np.abs(spectrum)
@@ -61,10 +63,26 @@ def dominant_freq_hz(
     magnitude = magnitude[valid]
     freqs = freqs[valid]
 
-    if magnitude.size == 0 or np.all(magnitude == 0):
+    if magnitude.size < 3 or np.all(magnitude <= 0):
         return float("nan")
 
-    return float(freqs[int(np.argmax(magnitude))])
+    peak = int(np.argmax(magnitude))
+
+    if peak == 0 or peak == len(magnitude) - 1:
+        return float(freqs[peak])
+
+    alpha = magnitude[peak - 1]
+    beta = magnitude[peak]
+    gamma = magnitude[peak + 1]
+
+    denom = alpha - 2.0 * beta + gamma
+    if denom == 0.0:
+        return float(freqs[peak])
+
+    p = 0.5 * (alpha - gamma) / denom
+    bin_width = freqs[1] - freqs[0]
+
+    return float(freqs[peak] + p * bin_width)
 
 
 class SoundReader:
@@ -73,10 +91,10 @@ class SoundReader:
         device=None,
         channels: int = 1,
         samplerate: Optional[float] = None,
-        blocksize: int = 1024,
+        blocksize: int = 4096,
         gate_db: float = -40.0,
         min_hz: float = 20.0,
-        fftsize: int = 0,
+        fftsize: int = 8192,
     ):
         self.device = device
         self.channels = channels
@@ -133,7 +151,7 @@ class SoundReader:
             return self.latest_db
 
     def _audio_callback(self, indata, frames, time_info, status):
-        mono = np.mean(indata, axis=1).copy()
+        mono = indata[:, 0].copy()
         level_db = rms_dbfs(mono)
 
         with self.lock:

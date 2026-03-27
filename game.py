@@ -7,9 +7,10 @@ from audio_reader import SoundReader
 # Screen
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
-FPS = 240
+FPS = 120
 background_path = "" # Add background here
 TEXT_COLOR = (235, 235, 235)
+BACKGROUND_COLOR = (0, 0, 0)
 
 # Player
 movement_smoothing = 30 # Higher value equals smoother movement
@@ -18,10 +19,17 @@ player_size = 20
 player_colour = (240, 240, 20)
 ticks_until_invisible = 40
 
+# Tone bar
+movement_speed = 2
+tone_bar_width = 300
+tone_bar_height = 30
+tone_bar_colour = (0, 204, 255)
+tone_bar_alpha = 150
+
 # Sound
 minimum_frequency = 150.0
 maximum_frequency = 500.0
-dB_threshold = 40.0
+dB_threshold = 50.0 # Higher = lower threshold
 
 
 def load_image_or_fallback(
@@ -96,15 +104,13 @@ class PlayerGlow(pygame.sprite.Sprite):
         self.x = float(x)
         self.y = float(y)
 
-        self.life = 200
-        self.max_life = 200
         self.scale = 1.0
 
         self.image = self.base_image.copy()
         self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
 
     def update(self, player_y: float) -> None:
-        self.x -= 3
+        self.x -= movement_speed
 
         # Krymp långsamt
         # self.scale *= 0.995
@@ -113,10 +119,43 @@ class PlayerGlow(pygame.sprite.Sprite):
 
         self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
 
-        self.life -= 1
-        if self.life <= 0:
+        if self.rect.x <= 0:
             self.kill()
 
+class ToneBar(pygame.sprite.Sprite):
+    def __init__(self, y: int):
+        super().__init__()
+
+        border_radius = tone_bar_height // 2
+        border_width = 2
+        border_colour = (255, 255, 255)
+
+        self.image = pygame.Surface((tone_bar_width, tone_bar_height), pygame.SRCALPHA)
+
+        # Filled rounded bar
+        pygame.draw.rect(
+            self.image,
+            (*tone_bar_colour, tone_bar_alpha),
+            (0, 0, tone_bar_width, tone_bar_height),
+            border_radius=border_radius
+        )
+
+        # Border
+        pygame.draw.rect(
+            self.image,
+            (*border_colour, tone_bar_alpha),
+            (0, 0, tone_bar_width, tone_bar_height),
+            width=border_width,
+            border_radius=border_radius
+        )
+
+        self.rect = self.image.get_rect(midleft=(SCREEN_WIDTH, y))
+
+    def update(self):
+        self.rect.x -= movement_speed
+
+        if self.rect.right < 0:
+            self.kill()
 
 
 
@@ -127,7 +166,7 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     background = load_image_or_fallback(
         background_path,
         (SCREEN_WIDTH, SCREEN_HEIGHT),
-        (45, 60, 90),
+        BACKGROUND_COLOR,
     )
 
     player_group = pygame.sprite.Group()
@@ -135,6 +174,8 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     player_group.add(player)
 
     player_glow_group = pygame.sprite.Group()
+
+    tone_bar_group = pygame.sprite.Group()
 
     audio = SoundReader(
         device=microphone["index"],
@@ -163,12 +204,15 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
                     if event.key == pygame.K_ESCAPE:
                         return True
 
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        tone_bar = ToneBar(300)
+                        tone_bar_group.add(tone_bar)
+
             current_frequency = audio.get_latest_frequency()
 
             if current_frequency is None:
                 none_ticks += 1
-
-                player_group.update(SCREEN_HEIGHT // 2)
 
                 if none_ticks >= ticks_until_invisible and player_visible:
                     player_group.remove(player)
@@ -194,7 +238,9 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
                 player_glow_group.add(player_glow)
 
             player_glow_group.update(player.rect.y)
+            tone_bar_group.update()
             screen.blit(background, (0, 0))
+            tone_bar_group.draw(screen)
             player_glow_group.draw(screen)
             player_group.draw(screen)
 

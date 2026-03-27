@@ -91,10 +91,10 @@ class SoundReader:
         device=None,
         channels: int = 1,
         samplerate: Optional[float] = None,
-        blocksize: int = 4096,
+        blocksize: int = 16384,
         gate_db: float = -40.0,
         min_hz: float = 20.0,
-        fftsize: int = 8192,
+        fftsize: int = 32768,
     ):
         self.device = device
         self.channels = channels

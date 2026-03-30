@@ -21,7 +21,7 @@ TEXT_COLOR = (235, 235, 235)
 BACKGROUND_COLOR = (0, 0, 0)
 
 # Player
-movement_smoothing = 10 # Higher value equals smoother movement
+movement_smoothing = 5 # Higher value equals smoother movement (1 = no smoothing)
 player_path = "" # Add player sprite here
 player_size = 20
 player_colour = (240, 240, 20)
@@ -35,35 +35,31 @@ tone_bar_colour = (0, 204, 255)
 tone_bar_alpha = 150
 
 # Sound input
-minimum_frequency = 80.0
-maximum_frequency = 1000.0
-dB_threshold = 40.0 # Higher = lower threshold
+minimum_frequency = 90.0
+maximum_frequency = 610.0
+dB_threshold = 50.0 # Higher = lower threshold
 
 # Sound output
 AUDIO_FOLDER = "audio"
-MP3_DURATION_FRAMES = FPS * 3  # 3 seconds
+MP3_DURATION_FRAMES = FPS * 2  # 3 seconds
 
 # Piano keys and their frequency (range: 80hz - 1000hz)
 piano_frequencies = {
     "A2": 110,
     "A3": 220,
     "A4": 440,
-    "A5": 880,
 
     "Ab2": 104,
     "Ab3": 208,
     "Ab4": 415,
-    "Ab5": 831,
 
     "B2": 123,
     "B3": 247,
     "B4": 494,
-    "B5": 988,
 
     "Bb2": 117,
     "Bb3": 233,
     "Bb4": 466,
-    "Bb5": 932,
 
     "C3": 131,
     "C4": 262,
@@ -77,29 +73,22 @@ piano_frequencies = {
     "Db4": 277,
     "Db5": 554,
 
-    "E2": 82,
     "E3": 165,
     "E4": 330,
-    "E5": 659,
 
     "Eb3": 156,
     "Eb4": 311,
-    "Eb5": 622,
 
-    "F2": 87,
     "F3": 175,
     "F4": 349,
-    "F5": 698,
 
     "G2": 98,
     "G3": 196,
     "G4": 392,
-    "G5": 784,
 
     "Gb2": 92,
     "Gb3": 185,
-    "Gb4": 370,
-    "Gb5": 740
+    "Gb4": 370
 }
 
 def load_image_or_fallback(
@@ -245,6 +234,20 @@ class ToneBar(pygame.sprite.Sprite):
         if self.rect.right < 0:
             self.kill()
 
+# create player guide line
+guide_x = SCREEN_WIDTH // 2
+guide_top = 0
+guide_bottom = SCREEN_HEIGHT
+
+guide_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+pygame.draw.line(
+    guide_surface,
+    (180, 180, 180, 100),   # transparent gray
+    (guide_x, guide_top),
+    (guide_x, guide_bottom),
+    3,
+)
+
 
 def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bool:
     pygame.display.set_caption(f"Frequency game - {microphone['name']}")
@@ -262,11 +265,7 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     player_trail_group = pygame.sprite.Group()
     tone_bar_group = pygame.sprite.Group()
 
-    audio = SoundReader(
-        device=microphone["index"],
-        gate_db=-dB_threshold,
-        min_hz=20.0,
-    )
+    audio = SoundReader()
 
     title_font = pygame.font.Font(None, 16)
     info_font = pygame.font.Font(None, 16)
@@ -381,6 +380,10 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             tone_bar_group.update()
 
             screen.blit(background, (0, 0))
+
+            # Draw player guide line
+            screen.blit(guide_surface, (0, 0))
+
             tone_bar_group.draw(screen)
             player_trail_group.draw(screen)
             player_group.draw(screen)

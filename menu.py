@@ -128,9 +128,7 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
                 )
 
                 device_text = (
-                    f"[{device['index']}] {device['name']}  |  "
-                    f"channels: {device['max_input_channels']}  |  "
-                    f"samplerate: {device['default_samplerate']}"
+                    f"[{device['index']}] {device['name']}"
                 )
 
                 draw_text(

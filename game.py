@@ -7,7 +7,7 @@ from audio_reader import SoundReader
 # Variables
 # Game variables
 num_sounds_to_play = 3
-mp3_seconds = 2  # Seconds sound is played for
+mp3_seconds = 1.5  # Seconds sound is played for
 between_mp3_seconds = 0.1  # Seconds between mp3 sounds
 pre_game_seconds = 1  # Seconds before game starts
 post_game_seconds = 2  # Seconds after game ends and a new one can start
@@ -28,7 +28,7 @@ player_colour = (240, 240, 20)
 seconds_until_invisible = 0.1
 
 # Tone bar
-movement_speed = 2
+movement_speed = 1.5
 tone_bar_width = mp3_seconds * FPS * movement_speed
 tone_bar_height = 30
 tone_bar_colour = (0, 204, 255)

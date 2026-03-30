@@ -1,21 +1,26 @@
+import threading
+from typing import Optional
+
 import numpy as np
 import sounddevice as sd
-from collections import deque
-from typing import Optional
 
 
 def list_input_devices():
     devices = sd.query_devices()
-    return [
-        {
-            "index": i,
-            "name": str(d["name"]),
-            "max_input_channels": int(d["max_input_channels"]),
-            "default_samplerate": int(d["default_samplerate"]),
-        }
-        for i, d in enumerate(devices)
-        if int(d["max_input_channels"]) > 0
-    ]
+    microphones = []
+
+    for index, info in enumerate(devices):
+        if int(info["max_input_channels"]) > 0:
+            microphones.append(
+                {
+                    "index": index,
+                    "name": str(info["name"]),
+                    "max_input_channels": int(info["max_input_channels"]),
+                    "default_samplerate": int(info["default_samplerate"]),
+                }
+            )
+
+    return microphones
 
 
 def rms_dbfs(x: np.ndarray) -> float:
@@ -23,45 +28,61 @@ def rms_dbfs(x: np.ndarray) -> float:
     return 20.0 * np.log10(rms + 1e-12)
 
 
+def next_pow2(n: int) -> int:
+    p = 1
+    while p < n:
+        p <<= 1
+    return p
+
+
 def dominant_freq_hz(
     block: np.ndarray,
     samplerate: int,
     nfft: Optional[int],
     min_hz: float,
-    max_hz: Optional[float],
 ) -> float:
-    """
-    Behåller samma namn som tidigare, men använder en enklare
-    autokorrelationsmetod som ofta passar röster bättre.
-    """
     x = block.astype(np.float64, copy=False)
     x = x - np.mean(x)
 
-    if len(x) < 2:
+    n_samples = len(x)
+    if n_samples < 8:
         return float("nan")
 
-    corr = np.correlate(x, x, mode="full")
-    corr = corr[len(corr) // 2:]
+    if nfft is None:
+        nfft = next_pow2(n_samples)
 
-    if max_hz is None:
-        max_hz = samplerate / 2
+    if nfft < n_samples:
+        nfft = next_pow2(n_samples)
 
-    min_lag = max(1, int(samplerate / max_hz))
-    max_lag = min(len(corr) - 1, int(samplerate / min_hz))
+    window = np.hanning(n_samples)
+    spectrum = np.fft.rfft(x * window, n=nfft)
+    magnitude = np.abs(spectrum)
+    freqs = np.fft.rfftfreq(nfft, d=1.0 / samplerate)
 
-    if min_lag >= max_lag:
+    valid = freqs >= max(min_hz, 1e-9)
+    magnitude = magnitude[valid]
+    freqs = freqs[valid]
+
+    if magnitude.size < 3 or np.all(magnitude <= 0):
         return float("nan")
 
-    region = corr[min_lag:max_lag + 1]
-    if len(region) == 0:
-        return float("nan")
+    peak = int(np.argmax(magnitude))
 
-    lag = min_lag + int(np.argmax(region))
+    if peak == 0 or peak == len(magnitude) - 1:
+        return float(freqs[peak])
 
-    if lag <= 0:
-        return float("nan")
+    alpha = magnitude[peak - 1]
+    beta = magnitude[peak]
+    gamma = magnitude[peak + 1]
 
-    return float(samplerate / lag)
+    denom = alpha - 2.0 * beta + gamma
+    if denom == 0.0:
+        return float(freqs[peak])
+
+    p = 0.5 * (alpha - gamma) / denom
+    bin_width = freqs[1] - freqs[0]
+
+    return float(freqs[peak] + p * bin_width)
 
 
 class SoundReader:
@@ -71,26 +92,16 @@ class SoundReader:
         channels: int = 1,
         samplerate: Optional[float] = None,
         blocksize: int = 4096,
-        gate_open_db: float = -38.0,
-        gate_close_db: float = -42.0,
+        gate_db: float = -40.0,
         min_hz: float = 20.0,
-        max_hz: Optional[float] = 2000.0,
-        fftsize: int = 16384,
-        smoothing_alpha: float = 0.15,
-        median_window_size: int = 5,
+        fftsize: int = 8192,
     ):
         self.device = device
         self.channels = channels
         self.blocksize = blocksize
-        self.gate_open_db = gate_open_db
-        self.gate_close_db = gate_close_db
+        self.gate_db = gate_db
         self.min_hz = min_hz
-        self.max_hz = max_hz
-
-        # Behålls för kompatibilitet, även om de inte används lika mycket längre
         self.nfft = None if fftsize <= 0 else int(fftsize)
-        self.smoothing_alpha = float(smoothing_alpha)
-        self.median_window_size = max(1, int(median_window_size))
 
         if samplerate is None:
             info = sd.query_devices(device, "input")
@@ -98,12 +109,10 @@ class SoundReader:
 
         self.samplerate = int(samplerate)
 
+        self.lock = threading.Lock()
         self.active = False
         self.latest_frequency: Optional[float] = None
         self.latest_db: Optional[float] = None
-        self.smoothed_frequency: Optional[float] = None
-        self.freq_history: deque[float] = deque(maxlen=self.median_window_size)
-        self.gate_is_open = False
 
         self.stream = sd.InputStream(
             device=self.device,
@@ -122,70 +131,47 @@ class SoundReader:
         self.stream.close()
 
     def start_listening(self):
-        self.active = True
-        self.latest_frequency = None
-        self.latest_db = None
-        self.smoothed_frequency = None
-        self.freq_history.clear()
-        self.gate_is_open = False
+        with self.lock:
+            self.active = True
+            self.latest_frequency = None
+            self.latest_db = None
 
     def stop_listening(self):
-        self.active = False
-        self.latest_frequency = None
-        self.latest_db = None
-        self.smoothed_frequency = None
-        self.freq_history.clear()
-        self.gate_is_open = False
+        with self.lock:
+            self.active = False
+            self.latest_frequency = None
+            self.latest_db = None
 
     def get_latest_frequency(self) -> Optional[float]:
-        return self.latest_frequency
+        with self.lock:
+            return self.latest_frequency
 
     def get_latest_db(self) -> Optional[float]:
-        return self.latest_db
-
-    def _update_gate(self, level_db: float) -> bool:
-        if self.gate_is_open:
-            if level_db < self.gate_close_db:
-                self.gate_is_open = False
-        else:
-            if level_db >= self.gate_open_db:
-                self.gate_is_open = True
-        return self.gate_is_open
+        with self.lock:
+            return self.latest_db
 
     def _audio_callback(self, indata, frames, time_info, status):
         mono = indata[:, 0].copy()
         level_db = rms_dbfs(mono)
 
-        if not self.active:
-            return
+        with self.lock:
+            if not self.active:
+                return
 
-        self.latest_db = level_db
+            self.latest_db = level_db
 
-        if not self._update_gate(level_db):
-            self.latest_frequency = None
-            self.smoothed_frequency = None
-            self.freq_history.clear()
-            return
+            if level_db < self.gate_db:
+                self.latest_frequency = None
+                return
 
-        freq = dominant_freq_hz(
-            mono,
-            samplerate=self.samplerate,
-            nfft=self.nfft,
-            min_hz=self.min_hz,
-            max_hz=self.max_hz,
-        )
+            freq = dominant_freq_hz(
+                mono,
+                samplerate=self.samplerate,
+                nfft=self.nfft,
+                min_hz=self.min_hz,
+            )
 
-        if np.isnan(freq) or freq <= 0:
-            self.latest_frequency = None
-            return
-
-        self.freq_history.append(float(freq))
-        median_freq = float(np.median(self.freq_history))
-
-        if self.smoothed_frequency is None:
-            self.smoothed_frequency = median_freq
-        else:
-            a = self.smoothing_alpha
-            self.smoothed_frequency = a * median_freq + (1.0 - a) * self.smoothed_frequency
-
-        self.latest_frequency = float(self.smoothed_frequency)
+            if np.isnan(freq):
+                self.latest_frequency = None
+            else:
+                self.latest_frequency = float(freq)

@@ -12,6 +12,10 @@ FPS = 120
 BACKGROUND_COLOR = (0, 0, 0)
 TEXT_COLOR = (235, 235, 235)
 
+# Background visuals
+SPACE_TOP_COLOR = (9, 14, 36)
+SPACE_BOTTOM_COLOR = (18, 36, 62)
+
 # Game logic
 max_notes = 3
 mp3_seconds = 1.5
@@ -45,8 +49,8 @@ tone_bar_colour = (0, 204, 255)
 tone_bar_match_colour = (0, 220, 90)
 
 # Audio
-minimum_frequency = 100.0
-maximum_frequency = 910.0
+minimum_frequency = 65.41
+maximum_frequency = 1975.53
 dB_threshold = 50.0
 AUDIO_FOLDER = "audio"
 background_path = ""
@@ -65,26 +69,62 @@ last_note_is_hit = False
 
 # --- MUSICAL DATA ---
 NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+WHITE_NOTE_NAMES = ["C", "D", "E", "F", "G", "A", "B"]
+VISIBLE_LOW_NOTE = "C2"
+VISIBLE_HIGH_NOTE = "B6"
 
-WHITE_KEYS = []
-for oct in range(0, 9):
-    for n in ["C", "D", "E", "F", "G", "A", "B"]:
-        name = f"{n}{oct}"
-        if oct == 0 and n not in ["A", "B"]: continue
-        if oct == 8 and n != "C": continue
-        WHITE_KEYS.append(name)
+def note_to_midi(note_name: str) -> int:
+    if len(note_name) < 2:
+        return -1
+
+    note_prefix = note_name[:2] if len(note_name) > 2 and note_name[1] == "b" else note_name[0]
+    octave_text = note_name[len(note_prefix):]
+
+    try:
+        octave = int(octave_text)
+    except ValueError:
+        return -1
+
+    return (octave + 1) * 12 + NOTE_NAMES.index(note_prefix)
+
+def build_visible_white_keys(low_note: str, high_note: str) -> list[str]:
+    low_midi = note_to_midi(low_note)
+    high_midi = note_to_midi(high_note)
+    keys = []
+
+    for oct in range(0, 9):
+        for n in WHITE_NOTE_NAMES:
+            name = f"{n}{oct}"
+            midi = note_to_midi(name)
+
+            if low_midi <= midi <= high_midi:
+                keys.append(name)
+
+    return keys
+
+WHITE_KEYS = build_visible_white_keys(VISIBLE_LOW_NOTE, VISIBLE_HIGH_NOTE)
 
 piano_frequencies = {
+    "C3": 130.81, "Db3": 138.59, "D3": 146.83, "Eb3": 155.56, "E3": 164.81,
+    "F3": 174.61, "Gb3": 185.00,
     "G3": 196.00, "Ab3": 207.65, "A3": 220.00, "Bb3": 233.08, "B3": 246.94,
     "C4": 261.63, "Db4": 277.18, "D4": 293.66, "Eb4": 311.13, "E4": 329.63,
     "F4": 349.23, "Gb4": 369.99, "G4": 392.00, "Ab4": 415.30, "A4": 440.00,
     "Bb4": 466.16, "B4": 493.88,
-    "C5": 523.25, "Db5": 554.37, "D5": 587.33, "Eb5": 622.25
+    "C5": 523.25, "Db5": 554.37, "D5": 587.33, "Eb5": 622.25, "E5": 659.25,
+    "F5": 698.46, "Gb5": 739.99, "G5": 783.99
 }
 
 # --- HELPERS ---
 def get_white_key_v_size(screen_h: int) -> float:
     return max(1.0, (screen_h - (2 * PIANO_Y_OFFSET)) / len(WHITE_KEYS))
+
+def white_key_top_y(note_name: str, screen_h: int) -> int:
+    idx = WHITE_KEYS.index(note_name)
+    v_size = get_white_key_v_size(screen_h)
+    display_idx = len(WHITE_KEYS) - 1 - idx
+
+    return PIANO_Y_OFFSET + int(display_idx * v_size)
 
 def freq_to_note(freq: float) -> str:
     if freq <= 0: return ""
@@ -107,15 +147,19 @@ def get_note_y(note_name: str, screen_h: int) -> int:
         note_prefix = note_name[0:2]
         try:
             octave = int(note_name[2:])
-            offsets = {"Db": 0.7, "Eb": 1.7, "Gb": 3.7, "Ab": 4.7, "Bb": 5.7}
-            c_index = WHITE_KEYS.index(f"C{octave}")
-            rel_pos = offsets[note_prefix]
-            return PIANO_Y_OFFSET + int((c_index + rel_pos) * v_size) + int(v_size * BLACK_KEY_V_SIZE_RATIO) // 2
+            previous_white = {
+                "Db": "C",
+                "Eb": "D",
+                "Gb": "F",
+                "Ab": "G",
+                "Bb": "A",
+            }[note_prefix]
+            previous_note = f"{previous_white}{octave}"
+            return white_key_top_y(previous_note, screen_h)
         except: return -100
     else:
         try:
-            idx = WHITE_KEYS.index(note_name)
-            return PIANO_Y_OFFSET + int(idx * v_size + v_size // 2)
+            return white_key_top_y(note_name, screen_h) + int(v_size // 2)
         except: return -100
 
 def freq_to_y(freq: float, screen_h: int) -> int:
@@ -135,6 +179,31 @@ def load_image_or_fallback(path: str, size: tuple[int, int], fill_color: tuple[i
         except: pass
     surface = pygame.Surface(size, pygame.SRCALPHA)
     surface.fill(fill_color)
+    return surface
+
+def mix_color(
+    color_a: tuple[int, int, int],
+    color_b: tuple[int, int, int],
+    amount: float,
+) -> tuple[int, int, int]:
+    return (
+        int(color_a[0] + (color_b[0] - color_a[0]) * amount),
+        int(color_a[1] + (color_b[1] - color_a[1]) * amount),
+        int(color_a[2] + (color_b[2] - color_a[2]) * amount),
+    )
+
+def render_space_background(w: int, h: int) -> pygame.Surface:
+    surface = pygame.Surface((w, h))
+
+    for y in range(h):
+        amount = y / max(1, h - 1)
+        pygame.draw.line(
+            surface,
+            mix_color(SPACE_TOP_COLOR, SPACE_BOTTOM_COLOR, amount),
+            (0, y),
+            (w, y),
+        )
+
     return surface
 
 def seconds_to_ticks(seconds: float) -> int:
@@ -245,9 +314,8 @@ class ToneBar(pygame.sprite.Sprite):
 # --- OPTIMIZED DRAWING ---
 def render_grid(w: int, h: int) -> pygame.Surface:
     surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    v_size = get_white_key_v_size(h)
-    for i in range(len(WHITE_KEYS)):
-        gy = PIANO_Y_OFFSET + int(i * v_size + v_size // 2)
+    for note in WHITE_KEYS:
+        gy = get_note_y(note, h)
         pygame.draw.line(surf, (45, 45, 45), (0, gy), (w, gy), 1)
     return surf
 
@@ -256,8 +324,8 @@ def render_piano(w: int, h: int, active_note: str = None) -> pygame.Surface:
     v_size = get_white_key_v_size(h)
     
     # White keys
-    for i, note in enumerate(WHITE_KEYS):
-        r = pygame.Rect(0, PIANO_Y_OFFSET + int(i * v_size), WHITE_KEY_H_SIZE, int(v_size))
+    for note in WHITE_KEYS:
+        r = pygame.Rect(0, white_key_top_y(note, h), WHITE_KEY_H_SIZE, int(v_size))
         color = (0, 150, 255) if note == active_note else (255, 255, 255)
         pygame.draw.rect(surf, color, r)
         pygame.draw.rect(surf, (180, 180, 180), r, width=1)
@@ -265,14 +333,23 @@ def render_piano(w: int, h: int, active_note: str = None) -> pygame.Surface:
     # Black keys
     black_v_size = int(v_size * BLACK_KEY_V_SIZE_RATIO)
     for oct in range(0, 9):
-        try:
-            ci = WHITE_KEYS.index(f"C{oct}")
-            for i, bn in enumerate(["Db", "Eb", "Gb", "Ab", "Bb"]):
-                nn = f"{bn}{oct}"; rp = [0.7, 1.7, 3.7, 4.7, 5.7][i]
-                r = pygame.Rect(0, PIANO_Y_OFFSET + int((ci + rp) * v_size), BLACK_KEY_H_SIZE, black_v_size)
-                color = (0, 150, 255) if nn == active_note else (0, 0, 0)
-                pygame.draw.rect(surf, color, r); pygame.draw.rect(surf, (60, 60, 60), r, width=1)
-        except ValueError: continue
+        for bn, previous_white in {
+            "Db": "C",
+            "Eb": "D",
+            "Gb": "F",
+            "Ab": "G",
+            "Bb": "A",
+        }.items():
+            nn = f"{bn}{oct}"
+            previous_note = f"{previous_white}{oct}"
+
+            if previous_note not in WHITE_KEYS:
+                continue
+
+            y = white_key_top_y(previous_note, h) - int(black_v_size / 2)
+            r = pygame.Rect(0, y, BLACK_KEY_H_SIZE, black_v_size)
+            color = (0, 150, 255) if nn == active_note else (0, 0, 0)
+            pygame.draw.rect(surf, color, r); pygame.draw.rect(surf, (60, 60, 60), r, width=1)
     return surf
 
 def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bool:
@@ -280,7 +357,10 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     
     def refresh_layout():
         w, h = screen.get_size()
-        bg = load_image_or_fallback(background_path, (w, h), BACKGROUND_COLOR)
+        if background_path:
+            bg = load_image_or_fallback(background_path, (w, h), BACKGROUND_COLOR)
+        else:
+            bg = render_space_background(w, h)
         return w, h, bg
 
     w, h, background = refresh_layout()
@@ -289,7 +369,10 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     
     player = Player(w // 3, h // 3)
     tone_bar_group = pygame.sprite.Group()
-    audio = SoundReader(device=microphone["index"])
+    audio = SoundReader(
+        device=microphone["index"],
+        min_hz=minimum_frequency,
+    )
     big_font = pygame.font.Font(None, 40)
     cta_font = pygame.font.Font(None, 48)
 

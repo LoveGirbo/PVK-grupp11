@@ -18,29 +18,28 @@ player_max_score = 0
 last_player_score = 0.0
 last_note_is_hit = False
 
-tone_delta_threshold = 10
-
 # Screen
-SCREEN_WIDTH = 1400
-SCREEN_HEIGHT = 900
+SCREEN_WIDTH = 1512
+SCREEN_HEIGHT = 982
 FPS = 120
 background_path = ""  # Add background here
 TEXT_COLOR = (235, 235, 235)
-BACKGROUND_COLOR = (0, 0, 0)
+BACKGROUND_COLOR = (51, 255, 255)
 
 # Player
 movement_smoothing = 5  # Higher value equals smoother movement (1 = no smoothing)
-player_path = ""  # Add player sprite here
-player_size = 20
-player_colour = (240, 240, 20)
-seconds_until_invisible = 0.1
+player_path = "images/Player_sprite.png"  # Add player sprite here
+player_size = 60
+seconds_until_invisible = 2
+base_trail_colour = (235, 235, 235) # Trail colour
 
 # Tone bar
 movement_speed = 1
 tone_bar_width = mp3_seconds * FPS * movement_speed
-tone_bar_height = 30
+tone_bar_height = 40
 tone_bar_colour = (0, 204, 255)
 tone_bar_alpha = 150
+tone_delta_threshold = tone_bar_alpha / 2
 
 # Sound input
 minimum_frequency = 180.0
@@ -144,15 +143,18 @@ def stop_mp3() -> None:
 class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
-        self.image = pygame.Surface((player_size, player_size), pygame.SRCALPHA)
-        pygame.draw.circle(
+
+        self.image = pygame.image.load(player_path).convert_alpha()
+        self.image = pygame.transform.scale(
             self.image,
-            player_colour,
-            (player_size // 2, player_size // 2),
-            player_size // 2
+            (player_size, player_size)
         )
+
+        self.image = pygame.transform.rotate(self.image, -45)
+
         self.rect = self.image.get_rect(center=(x, y))
         self.center_y = float(self.rect.centery)
+        self.angle = 90
 
     def update(self, new_y: float) -> None:
         speed = 1 / movement_smoothing
@@ -164,14 +166,14 @@ class PlayerTrail(pygame.sprite.Sprite):
     def __init__(self, x: float, y: float):
         super().__init__()
 
-        self.base_size = player_size
+        self.base_size = player_size/3
         self.base_image = pygame.Surface((self.base_size, self.base_size), pygame.SRCALPHA)
 
         global last_note_is_hit
         if last_note_is_hit:
             trail_colour = (0, 255, 0)
         else:
-            trail_colour = player_colour
+            trail_colour = base_trail_colour
         last_note_is_hit = False
 
         pygame.draw.circle(
@@ -293,33 +295,32 @@ BLACK_KEYS = [
 
 
 def draw_piano(screen, active_note):
-    t = pygame.time.get_ticks() / 200
-    pulse = (math.sin(t) + 1) / 2  # värde mellan 0–1
+    piano_margin_right = int(SCREEN_WIDTH * 0.02)
+    piano_margin_top = int(SCREEN_HEIGHT * 0.02)
+    piano_margin_bottom = int(SCREEN_HEIGHT * 0.02)
 
-    piano_x = SCREEN_WIDTH - 150
-    piano_y = 10  # Starta högt upp
+    available_height = SCREEN_HEIGHT - piano_margin_top - piano_margin_bottom
 
-    # --- NYA MÅTT (Smalare för att få plats med alla nya tangenter) ---
-    white_key_width = 20  # Mycket smalare bredd per tangent
-    white_key_height = 140  # Behåller längden
+    white_key_width = available_height / len(WHITE_KEYS)
+    white_key_height = int(SCREEN_WIDTH * 0.09)
 
-    black_key_width = 12  # Smalare svarta
-    black_key_height = 90
+    black_key_width = int(white_key_width * 0.6)
+    black_key_height = int(white_key_height * 0.65)
 
-    # -------------------
-    # RITA VITA TANGENTER
-    # -------------------
+    piano_x = SCREEN_WIDTH - white_key_height - piano_margin_right
+    piano_y = piano_margin_top
+
+    # Rita vita tangenter
     for i, note in enumerate(WHITE_KEYS):
-        color = (255, 255, 255)
-        # OBS: Om du har flera 'C' behöver du en unik ID för active_note,
-        # men för utseendet fungerar detta:
+        key_y = piano_y + int(i * white_key_width)
 
         rect = pygame.Rect(
-            piano_x + 20,
-            piano_y + i * white_key_width,
+            piano_x,
+            key_y,
             white_key_height,
-            white_key_width
+            math.ceil(white_key_width)
         )
+
         color = (255, 255, 255)
         if note == active_note:
             color = (0, 100, 255)
@@ -327,41 +328,27 @@ def draw_piano(screen, active_note):
         pygame.draw.rect(screen, color, rect)
         pygame.draw.rect(screen, (0, 0, 0), rect, width=1)
 
-    # -------------------
-    # RITA SVARTA TANGENTER
-    # -------------------
-    # De svarta tangenternas positioner i en oktav (relativt de vita)
-    # C#, D#, (gap), F#, G#, A#, (gap)
-    # -------------------
-    # RITA SVARTA TANGENTER
-    # -------------------
-    # Namnen på de svarta tangenterna i ordning per oktav (för matchning)
+    # Rita svarta tangenter
     black_note_names = ["Db", "Eb", "Gb", "Ab", "Bb"]
-    # Positioner relativt vita tangenter: C#(0.7), D#(1.7), F#(3.7), G#(4.7), A#(5.7)
     black_offsets = [0.7, 1.7, 3.7, 4.7, 5.7]
 
-    for octave in range(1, 8):  # Loopa igenom oktaver (t.ex. 1-7)
-        for i in range(5):  # 5 svarta per oktav
-            # Skapa namnet på tangenten, t.ex. "Db" + "4" = "Db4"
+    for octave in range(1, 8):
+        for i in range(5):
             note_name = f"{black_note_names[i]}{octave}"
 
-            # Beräkna position (hitta index i WHITE_KEYS för att synka höjden)
-            # Varje oktav börjar efter 7 vita tangenter.
-            # Vi justerar startindex (-2) för att matcha att WHITE_KEYS börjar på A0
             rel_pos = black_offsets[i] + ((octave - 1) * 7) + 2
+            key_y = piano_y + int(rel_pos * white_key_width)
 
             rect = pygame.Rect(
-                piano_x + 70,
-                piano_y + int(rel_pos * white_key_width),
+                piano_x,
+                key_y,
                 black_key_height,
                 black_key_width
             )
 
-            # Färgsättning: Grön om aktiv, annars svart
+            color = (0, 0, 0)
             if note_name == active_note:
                 color = (0, 100, 255)
-            else:
-                color = (0, 0, 0)
 
             pygame.draw.rect(screen, color, rect)
             pygame.draw.rect(screen, (60, 60, 60), rect, width=1)
@@ -411,10 +398,10 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
         while True:
             clock.tick(FPS)
 
-            if mp3_ticks <= 0:
+            if mp3_ticks <= 0 and between_mp3_ticks <= 0:
                 current_frequency = audio.get_latest_frequency()
             else:
-                current_frequency = None
+                current_frequency = abs(minimum_frequency-maximum_frequency)/2
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: return False
@@ -496,7 +483,13 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
             # --- RITNING ---
             screen.blit(background, (0, 0))
-            screen.blit(guide_surface, (0, 0))
+            pygame.draw.line(
+                screen,
+                (180, 180, 180),
+                (SCREEN_WIDTH // 3, 0),
+                (SCREEN_WIDTH // 3, SCREEN_HEIGHT),
+                3
+            )
             tone_bar_group.draw(screen)
             player_trail_group.draw(screen)
             player_group.draw(screen)

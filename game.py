@@ -26,6 +26,7 @@ movement_smoothing = 5
 # Player visuals
 player_size = 20
 player_colour = (240, 240, 20)
+player_path = "images/Player_sprite.png" # Example sprite path
 
 # Tone bar visuals
 tone_bar_alpha = 200 # More solid
@@ -140,8 +141,14 @@ def stop_mp3() -> None:
 class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
-        self.image = pygame.Surface((player_size, player_size), pygame.SRCALPHA)
-        pygame.draw.circle(self.image, player_colour, (player_size // 2, player_size // 2), player_size // 2)
+        # Try to load sprite, fallback to circle
+        if player_path and os.path.exists(player_path):
+            self.image = pygame.image.load(player_path).convert_alpha()
+            self.image = pygame.transform.scale(self.image, (player_size * 2, player_size * 2))
+        else:
+            self.image = pygame.Surface((player_size, player_size), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, player_colour, (player_size // 2, player_size // 2), player_size // 2)
+        
         self.rect = self.image.get_rect(center=(x, y))
         self.center_y = float(self.rect.centery)
 

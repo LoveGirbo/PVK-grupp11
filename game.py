@@ -17,11 +17,15 @@ SPACE_TOP_COLOR = (9, 14, 36)
 SPACE_BOTTOM_COLOR = (18, 36, 62)
 
 # Game logic
+test_mode = False
 max_notes = 3
 mp3_seconds = 1.5
 between_mp3_seconds = 0.1
 seconds_until_invisible = 0.1
 tone_delta_threshold = 10
+match_grace_frames = 3
+wave_frequency_smoothing = 0.02
+wave_amplitude_smoothing = 0.08
 
 # Movement
 movement_speed = 1
@@ -33,15 +37,16 @@ player_rotation = -45
 player_max_tilt = 35
 player_tilt_response = 3.0
 player_tilt_smoothing = 0.25
+player_sprite_supersample = 3
 player_colour = (240, 240, 20)
 player_path = "images/Player_sprite.png" # Example sprite path
 
 # Exhaust visuals
 exhaust_particles_per_frame = 4
-exhaust_max_particles = 360
-exhaust_lifetime = 140
-exhaust_start_radius = 14
-exhaust_spread = 14
+exhaust_max_particles = 520
+exhaust_lifetime = 190
+exhaust_start_radius = 11
+exhaust_spread = 9
 
 # Tone bar visuals
 tone_bar_alpha = 200 # More solid
@@ -212,6 +217,11 @@ def seconds_to_ticks(seconds: float) -> int:
 def play_mp3(filename: str) -> None:
     path = os.path.join(AUDIO_FOLDER, filename)
     if not os.path.exists(path): return
+    if not pygame.mixer.get_init():
+        try:
+            pygame.mixer.init()
+        except pygame.error:
+            return
     pygame.mixer.music.load(path)
     pygame.mixer.music.play()
 
@@ -223,19 +233,33 @@ class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
         sprite_size = player_size * 2
+        source_size = sprite_size * player_sprite_supersample
 
         # Try to load sprite, fallback to circle
         if player_path and os.path.exists(player_path):
             image = pygame.image.load(player_path).convert_alpha()
-            self.base_image = pygame.transform.smoothscale(image, (sprite_size, sprite_size))
+            self.source_image = pygame.transform.smoothscale(image, (source_size, source_size))
         else:
-            self.base_image = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
-            pygame.draw.circle(self.base_image, player_colour, (sprite_size // 2, sprite_size // 2), sprite_size // 2)
+            self.source_image = pygame.Surface((source_size, source_size), pygame.SRCALPHA)
+            pygame.draw.circle(self.source_image, player_colour, (source_size // 2, source_size // 2), source_size // 2)
         
+        self.sprite_size = sprite_size
         self.tilt = 0.0
-        self.image = pygame.transform.rotate(self.base_image, player_rotation)
+        self.image = self.render_image()
         self.rect = self.image.get_rect(center=(x, y))
         self.center_y = float(self.rect.centery)
+
+    def render_image(self) -> pygame.Surface:
+        high_res_image = pygame.transform.rotate(
+            self.source_image,
+            player_rotation + self.tilt
+        )
+        target_size = (
+            max(1, high_res_image.get_width() // player_sprite_supersample),
+            max(1, high_res_image.get_height() // player_sprite_supersample),
+        )
+
+        return pygame.transform.smoothscale(high_res_image, target_size)
 
     def update(self, new_y: float, target_x: int) -> None:
         speed = 1 / movement_smoothing
@@ -251,10 +275,7 @@ class Player(pygame.sprite.Sprite):
         self.tilt += (target_tilt - self.tilt) * player_tilt_smoothing
 
         center = (target_x, round(self.center_y))
-        self.image = pygame.transform.rotate(
-            self.base_image,
-            player_rotation + self.tilt
-        )
+        self.image = self.render_image()
         self.rect = self.image.get_rect(center=center)
 
 class ToneBar(pygame.sprite.Sprite):
@@ -264,6 +285,7 @@ class ToneBar(pygame.sprite.Sprite):
         self.note_name = note_name
         self.width = int(mp3_seconds * FPS * movement_speed)
         self.is_matched = False
+        self.match_grace = 0
         self.update_image(screen_h)
         self.rect = self.image.get_rect(midleft=(screen_w, freq_to_y(frequency, screen_h)))
 
@@ -288,11 +310,21 @@ class ToneBar(pygame.sprite.Sprite):
         txt = font.render(label, True, (255, 255, 255))
         self.image.blit(txt, txt.get_rect(center=(self.width // 2, h // 2)))
 
-    def update(self, player_y: float, target_x: int, screen_h: int) -> None:
+    def update(self, player_y: float, target_x: int, screen_h: int, input_active: bool) -> None:
         self.rect.x -= movement_speed
         self.rect.centery = freq_to_y(self.frequency, screen_h)
         is_at_target = self.rect.left <= target_x <= self.rect.right
-        is_matched = is_at_target and abs(player_y - self.rect.centery) < (self.rect.height // 2)
+        has_live_match = (
+            input_active
+            and is_at_target
+            and abs(player_y - self.rect.centery) < (self.rect.height // 2)
+        )
+        if has_live_match:
+            self.match_grace = match_grace_frames
+        elif self.match_grace > 0:
+            self.match_grace -= 1
+
+        is_matched = is_at_target and (has_live_match or self.match_grace > 0)
 
         if is_matched != self.is_matched:
             center = self.rect.center
@@ -313,11 +345,7 @@ class ToneBar(pygame.sprite.Sprite):
 
 # --- OPTIMIZED DRAWING ---
 def render_grid(w: int, h: int) -> pygame.Surface:
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    for note in WHITE_KEYS:
-        gy = get_note_y(note, h)
-        pygame.draw.line(surf, (45, 45, 45), (0, gy), (w, gy), 1)
-    return surf
+    return pygame.Surface((w, h), pygame.SRCALPHA)
 
 def render_piano(w: int, h: int, active_note: str = None) -> pygame.Surface:
     surf = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -352,6 +380,45 @@ def render_piano(w: int, h: int, active_note: str = None) -> pygame.Surface:
             pygame.draw.rect(surf, color, r); pygame.draw.rect(surf, (60, 60, 60), r, width=1)
     return surf
 
+def draw_frequency_indicator(
+    screen: pygame.Surface,
+    frequency: float = None,
+    strength: float = 0.0,
+) -> None:
+    screen_w, screen_h = screen.get_size()
+    overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    width = max(1, screen_w - WHITE_KEY_H_SIZE)
+    start_x = WHITE_KEY_H_SIZE
+    y = max(90, screen_h // 7)
+    points = []
+    has_frequency = frequency is not None
+    phase = pygame.time.get_ticks() * 0.008
+    amplitude = 42 * max(0.0, min(1.0, strength))
+    frequency_amount = (
+        max(0.0, min(1.0, (frequency - minimum_frequency) / (maximum_frequency - minimum_frequency)))
+        if has_frequency
+        else 0.0
+    )
+    wave_density = 0.035 + frequency_amount * 0.075
+
+    for i in range(width + 1):
+        edge_fade = math.sin((i / width) * math.pi)
+        wave = (
+            math.sin(i * wave_density + phase) * 0.86
+            + math.sin(i * wave_density * 2.0 - phase * 0.7) * 0.14
+        )
+        points.append((start_x + i, y + int(wave * amplitude * edge_fade)))
+
+    for offset, color, line_width in [
+        (4, (70, 40, 255, 12), 6),
+        (2, (95, 95, 255, 24), 4),
+        (0, (155, 230, 255, 105), 1),
+    ]:
+        shifted_points = [(px, py + offset) for px, py in points]
+        pygame.draw.lines(overlay, color, False, shifted_points, line_width)
+
+    screen.blit(overlay, (0, 0))
+
 def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bool:
     pygame.display.set_caption(f"Frequency game - {microphone['name']}")
     
@@ -379,6 +446,8 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     player_visible = False
     game_state = 0; notes_sent = 0; mp3_ticks = 0; pause_timer = 0; none_ticks = 0
     exhaust_particles = []; last_active_note = None
+    displayed_wave_frequency = None
+    displayed_wave_strength = 0.0
     
     global player_score, player_max_score, last_player_score, last_note_is_hit
     player_score = 0; player_max_score = 0
@@ -392,11 +461,25 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             clock.tick(FPS)
             w, h = screen.get_size(); target_x = w // 3
             current_freq = audio.get_latest_frequency() if mp3_ticks <= 0 else None
-            un = freq_to_note(current_freq) if current_freq else None
+            current_note = freq_to_note(current_freq) if current_freq else None
 
-            if un != last_active_note:
-                cached_piano = render_piano(w, h, un)
-                last_active_note = un
+            if current_freq is None:
+                displayed_wave_frequency = None
+            elif displayed_wave_frequency is None:
+                displayed_wave_frequency = current_freq
+            else:
+                displayed_wave_frequency += (
+                    current_freq - displayed_wave_frequency
+                ) * wave_frequency_smoothing
+
+            target_wave_strength = 1.0 if current_freq is not None else 0.0
+            displayed_wave_strength += (
+                target_wave_strength - displayed_wave_strength
+            ) * wave_amplitude_smoothing
+
+            if current_note != last_active_note:
+                cached_piano = render_piano(w, h, current_note)
+                last_active_note = current_note
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: return False
@@ -404,7 +487,7 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
                 if event.type == pygame.VIDEORESIZE:
                     w, h, background = refresh_layout()
                     cached_grid = render_grid(w, h)
-                    cached_piano = render_piano(w, h, un)
+                    cached_piano = render_piano(w, h, current_note)
                     for tb in tone_bar_group: tb.update_image(h)
 
             if player_max_score > 0: last_player_score = (player_score / player_max_score) * 100
@@ -438,11 +521,17 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
                 player.update(freq_to_y(current_freq, h), target_x)
             else:
                 none_ticks += 1
-                if none_ticks >= seconds_to_ticks(seconds_until_invisible): player_visible = False
+                if not test_mode and none_ticks >= seconds_to_ticks(seconds_until_invisible): player_visible = False
 
-            tone_bar_group.update(player.rect.centery, target_x, h)
+            if test_mode:
+                player_visible = True
+
+            input_active = current_freq is not None
+            tone_bar_group.update(player.rect.centery, target_x, h, input_active)
 
             matching_tone = any(
+                input_active
+                and
                 tone_bar.rect.left <= target_x <= tone_bar.rect.right
                 and abs(player.rect.centery - tone_bar.rect.centery) < (tone_bar.rect.height // 2)
                 for tone_bar in tone_bar_group
@@ -451,17 +540,20 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             if player_visible:
                 exhaust_x = player.rect.left + player.rect.width * 0.18
                 exhaust_y = player.rect.centery
+                exhaust_matched = matching_tone
                 exhaust_color = (0, 255, 100) if matching_tone else (255, 150, 40)
 
                 for _ in range(exhaust_particles_per_frame):
+                    offset_x = random.uniform(-4, 10)
                     exhaust_particles.append({
-                        "x": exhaust_x + random.uniform(-4, 4),
-                        "y": exhaust_y + random.uniform(-exhaust_spread, exhaust_spread),
+                        "x": exhaust_x + offset_x,
+                        "y": exhaust_y + random.uniform(-exhaust_spread, exhaust_spread) * (1 - max(0, offset_x) / 14),
                         "age": 0,
                         "life": exhaust_lifetime + random.randint(-12, 12),
-                        "radius": random.uniform(exhaust_start_radius * 0.45, exhaust_start_radius),
-                        "drift": random.uniform(-0.7, 0.7),
+                        "radius": random.uniform(exhaust_start_radius * 0.35, exhaust_start_radius),
+                        "drift": random.uniform(-0.45, 0.45),
                         "color": exhaust_color,
+                        "matched": exhaust_matched,
                     })
 
             new_particles = []
@@ -482,12 +574,17 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             # --- RENDER ---
             screen.blit(background, (0, 0))
             screen.blit(cached_grid, (0, 0)) # Grid is furthest back
-            
-            # Hit line above grid
+
             pygame.draw.line(screen, (100, 100, 100), (target_x, 0), (target_x, h), 2)
             
             # Notes above grid
             tone_bar_group.draw(screen)
+
+            draw_frequency_indicator(
+                screen,
+                displayed_wave_frequency,
+                displayed_wave_strength,
+            )
             
             # Exhaust above notes
             if exhaust_particles:
@@ -495,10 +592,19 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
                 for particle in exhaust_particles:
                     progress = particle["age"] / particle["life"]
-                    radius = max(1, int(particle["radius"] * (1 - progress)))
-                    alpha = max(0, int(210 * (1 - progress) ** 1.6))
+                    taper = (1 - progress) ** 1.7
+                    radius = max(1, int(particle["radius"] * taper))
+                    alpha = max(0, int(225 * (1 - progress) ** 1.35))
 
-                    if progress < 0.28:
+                    if particle["matched"]:
+                        if progress < 0.28:
+                            color = (185, 255, 190)
+                        elif progress < 0.75:
+                            color = particle["color"]
+                        else:
+                            fade = int(95 * (1 - progress))
+                            color = (20, max(35, fade + 45), 35)
+                    elif progress < 0.28:
                         color = (255, 245, 170)
                     elif progress < 0.62:
                         color = particle["color"]

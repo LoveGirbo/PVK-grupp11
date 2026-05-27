@@ -24,7 +24,11 @@ movement_speed = 1
 movement_smoothing = 5
 
 # Player visuals
-player_size = 20
+player_size = 36
+player_rotation = -45
+player_max_tilt = 35
+player_tilt_response = 3.0
+player_tilt_smoothing = 0.25
 player_colour = (240, 240, 20)
 player_path = "images/Player_sprite.png" # Example sprite path
 
@@ -141,22 +145,40 @@ def stop_mp3() -> None:
 class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
+        sprite_size = player_size * 2
+
         # Try to load sprite, fallback to circle
         if player_path and os.path.exists(player_path):
-            self.image = pygame.image.load(player_path).convert_alpha()
-            self.image = pygame.transform.scale(self.image, (player_size * 2, player_size * 2))
+            image = pygame.image.load(player_path).convert_alpha()
+            self.base_image = pygame.transform.smoothscale(image, (sprite_size, sprite_size))
         else:
-            self.image = pygame.Surface((player_size, player_size), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, player_colour, (player_size // 2, player_size // 2), player_size // 2)
+            self.base_image = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
+            pygame.draw.circle(self.base_image, player_colour, (sprite_size // 2, sprite_size // 2), sprite_size // 2)
         
+        self.tilt = 0.0
+        self.image = pygame.transform.rotate(self.base_image, player_rotation)
         self.rect = self.image.get_rect(center=(x, y))
         self.center_y = float(self.rect.centery)
 
     def update(self, new_y: float, target_x: int) -> None:
         speed = 1 / movement_smoothing
+        old_y = self.center_y
+
         self.center_y += (new_y - self.center_y) * speed
-        self.rect.centery = round(self.center_y)
-        self.rect.centerx = target_x
+        y_velocity = self.center_y - old_y
+
+        target_tilt = max(
+            -player_max_tilt,
+            min(player_max_tilt, -y_velocity * player_tilt_response)
+        )
+        self.tilt += (target_tilt - self.tilt) * player_tilt_smoothing
+
+        center = (target_x, round(self.center_y))
+        self.image = pygame.transform.rotate(
+            self.base_image,
+            player_rotation + self.tilt
+        )
+        self.rect = self.image.get_rect(center=center)
 
 class ToneBar(pygame.sprite.Sprite):
     def __init__(self, frequency: float, note_name: str, screen_h: int, screen_w: int):
@@ -247,7 +269,7 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
     
     player = Player(w // 3, h // 3)
     tone_bar_group = pygame.sprite.Group()
-    audio = SoundReader()
+    audio = SoundReader(device=microphone["index"])
     big_font = pygame.font.Font(None, 40)
     cta_font = pygame.font.Font(None, 48)
 

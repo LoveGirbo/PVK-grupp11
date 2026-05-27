@@ -1,7 +1,6 @@
 import pygame
 
 from audio_reader import list_input_devices
-from game import SCREEN_WIDTH, SCREEN_HEIGHT
 
 FPS = 60
 
@@ -26,6 +25,23 @@ def draw_text(
     surface.blit(rendered, (x, y))
 
 
+def fit_text(text: str, font: pygame.font.Font, max_width: int) -> str:
+    if font.size(text)[0] <= max_width:
+        return text
+
+    ellipsis = "..."
+    available_width = max_width - font.size(ellipsis)[0]
+
+    if available_width <= 0:
+        return ellipsis
+
+    fitted = text
+    while fitted and font.size(fitted)[0] > available_width:
+        fitted = fitted[:-1]
+
+    return fitted + ellipsis
+
+
 def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
     pygame.display.set_caption("Frequency game - microphone selection")
 
@@ -40,24 +56,26 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
     while True:
         clock.tick(FPS)
 
-        visible_count = 9
+        screen_w, screen_h = screen.get_size()
         list_top = 140
         item_height = 48
+        list_bottom = screen_h - 100
+        visible_count = max(1, (list_bottom - list_top) // item_height)
 
         if selected < scroll_offset:
             scroll_offset = selected
         elif selected >= scroll_offset + visible_count:
             scroll_offset = selected - visible_count + 1
 
-        start_button = pygame.Rect(SCREEN_WIDTH - 220, SCREEN_HEIGHT - 80, 160, 44)
-        refresh_button = pygame.Rect(40, SCREEN_HEIGHT - 80, 140, 44)
+        start_button = pygame.Rect(max(200, screen_w - 220), screen_h - 80, 160, 44)
+        refresh_button = pygame.Rect(40, screen_h - 80, 140, 44)
 
         item_rects = []
         visible_devices = devices[scroll_offset:scroll_offset + visible_count]
 
         for i, _device in enumerate(visible_devices):
             y = list_top + i * item_height
-            rect = pygame.Rect(40, y, SCREEN_WIDTH - 80, 40)
+            rect = pygame.Rect(40, y, max(120, screen_w - 80), 40)
             item_rects.append((rect, scroll_offset + i))
 
         for event in pygame.event.get():
@@ -100,6 +118,9 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
                     if rect.collidepoint(mouse_pos):
                         selected = index
 
+            if event.type == pygame.MOUSEWHEEL and devices:
+                selected = max(0, min(selected - event.y, len(devices) - 1))
+
         screen.fill(BG_COLOR)
 
         draw_text(screen, "Choose microphone", title_font, TEXT_COLOR, 40, 40)
@@ -127,8 +148,10 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
                     border_radius=8,
                 )
 
-                device_text = (
-                    f"[{device['index']}] {device['name']}"
+                device_text = fit_text(
+                    f"[{device['index']}] {device['name']}",
+                    small_font,
+                    rect.width - 24,
                 )
 
                 draw_text(

@@ -2,531 +2,652 @@ import os
 import random
 import pygame
 import math
-import random
 
 from audio_reader import SoundReader
 
-# Variables
-# Game variables
-max_notes = 3
-mp3_seconds = 1.5  # Seconds sound is played for
-between_mp3_seconds = 0.1  # Seconds between mp3 sounds
-pre_game_seconds = 1  # Seconds before game starts
+# --- CONSTANTS ---
+SCREEN_WIDTH = 1400
+SCREEN_HEIGHT = 900
+FPS = 120
+BACKGROUND_COLOR = (0, 0, 0)
+TEXT_COLOR = (235, 235, 235)
 
+# Background visuals
+SPACE_TOP_COLOR = (9, 14, 36)
+SPACE_BOTTOM_COLOR = (18, 36, 62)
+
+# Game logic
+test_mode = False
+max_notes = 3
+mp3_seconds = 1.5
+between_mp3_seconds = 0.1
+seconds_until_invisible = 0.1
+tone_delta_threshold = 10
+match_grace_frames = 3
+wave_frequency_smoothing = 0.02
+wave_amplitude_smoothing = 0.08
+
+# Movement
+movement_speed = 1
+movement_smoothing = 5
+
+# Player visuals
+player_size = 36
+player_rotation = -45
+player_max_tilt = 35
+player_tilt_response = 3.0
+player_tilt_smoothing = 0.25
+player_sprite_supersample = 3
+player_colour = (240, 240, 20)
+player_path = "images/Player_sprite.png" # Example sprite path
+
+# Exhaust visuals
+exhaust_particles_per_frame = 4
+exhaust_max_particles = 520
+exhaust_lifetime = 190
+exhaust_start_radius = 11
+exhaust_spread = 9
+
+# Tone bar visuals
+tone_bar_alpha = 200 # More solid
+tone_bar_colour = (0, 204, 255)
+tone_bar_match_colour = (0, 220, 90)
+
+# Audio
+minimum_frequency = 65.41
+maximum_frequency = 1975.53
+dB_threshold = 50.0
+AUDIO_FOLDER = "audio"
+background_path = ""
+
+# Piano drawing constants
+PIANO_Y_OFFSET = 10
+WHITE_KEY_H_SIZE = 140
+BLACK_KEY_V_SIZE_RATIO = 0.6
+BLACK_KEY_H_SIZE = 90
+
+# Globals for scoring
 player_score = 0
 player_max_score = 0
 last_player_score = 0.0
 last_note_is_hit = False
 
-# Screen
-SCREEN_WIDTH = 1512
-SCREEN_HEIGHT = 982
-FPS = 120
-background_path = ""  # Add background here
-TEXT_COLOR = (235, 235, 235)
-BACKGROUND_COLOR = (51, 255, 255)
+# --- MUSICAL DATA ---
+NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+WHITE_NOTE_NAMES = ["C", "D", "E", "F", "G", "A", "B"]
+VISIBLE_LOW_NOTE = "C2"
+VISIBLE_HIGH_NOTE = "B6"
 
-# Player
-movement_smoothing = 5  # Higher value equals smoother movement (1 = no smoothing)
-player_path = "images/Player_sprite.png"  # Add player sprite here
-player_size = 60
-seconds_until_invisible = 2
-base_trail_colour = (235, 235, 235) # Trail colour
+def note_to_midi(note_name: str) -> int:
+    if len(note_name) < 2:
+        return -1
 
-# Tone bar
-movement_speed = 1
-tone_bar_width = mp3_seconds * FPS * movement_speed
-tone_bar_height = 40
-tone_bar_colour = (0, 204, 255)
-tone_bar_alpha = 150
-tone_delta_threshold = tone_bar_alpha / 2
+    note_prefix = note_name[:2] if len(note_name) > 2 and note_name[1] == "b" else note_name[0]
+    octave_text = note_name[len(note_prefix):]
 
-# Sound input
-minimum_frequency = 180.0
-maximum_frequency = 610.0
-dB_threshold = 50.0  # Higher = lower threshold
+    try:
+        octave = int(octave_text)
+    except ValueError:
+        return -1
 
-# Sound output
-AUDIO_FOLDER = "audio"
-MP3_DURATION_FRAMES = FPS * 2  # 3 seconds
+    return (octave + 1) * 12 + NOTE_NAMES.index(note_prefix)
 
-# Piano keys and their frequency (range: 80hz - 1000hz)
+def build_visible_white_keys(low_note: str, high_note: str) -> list[str]:
+    low_midi = note_to_midi(low_note)
+    high_midi = note_to_midi(high_note)
+    keys = []
+
+    for oct in range(0, 9):
+        for n in WHITE_NOTE_NAMES:
+            name = f"{n}{oct}"
+            midi = note_to_midi(name)
+
+            if low_midi <= midi <= high_midi:
+                keys.append(name)
+
+    return keys
+
+WHITE_KEYS = build_visible_white_keys(VISIBLE_LOW_NOTE, VISIBLE_HIGH_NOTE)
+
 piano_frequencies = {
-    "A3": 220,
-    "A4": 440,
-
-    "Ab3": 208,
-    "Ab4": 415,
-
-    "B3": 247,
-    "B4": 494,
-
-    "Bb3": 233,
-    "Bb4": 466,
-
-    "C4": 262,
-    "C5": 523,
-
-    "D4": 294,
-    "D5": 587,
-
-    "Db4": 277,
-    "Db5": 554,
-
-    "E4": 330,
-
-    "Eb4": 311,
-
-    "F4": 349,
-
-    "Gb3": 185,
-    "Gb4": 370
+    "C3": 130.81, "Db3": 138.59, "D3": 146.83, "Eb3": 155.56, "E3": 164.81,
+    "F3": 174.61, "Gb3": 185.00,
+    "G3": 196.00, "Ab3": 207.65, "A3": 220.00, "Bb3": 233.08, "B3": 246.94,
+    "C4": 261.63, "Db4": 277.18, "D4": 293.66, "Eb4": 311.13, "E4": 329.63,
+    "F4": 349.23, "Gb4": 369.99, "G4": 392.00, "Ab4": 415.30, "A4": 440.00,
+    "Bb4": 466.16, "B4": 493.88,
+    "C5": 523.25, "Db5": 554.37, "D5": 587.33, "Eb5": 622.25, "E5": 659.25,
+    "F5": 698.46, "Gb5": 739.99, "G5": 783.99
 }
 
+# --- HELPERS ---
+def get_white_key_v_size(screen_h: int) -> float:
+    return max(1.0, (screen_h - (2 * PIANO_Y_OFFSET)) / len(WHITE_KEYS))
 
-def load_image_or_fallback(
-        path: str,
-        size: tuple[int, int],
-        fill_color: tuple[int, int, int],
-) -> pygame.Surface:
-    if os.path.exists(path):
-        image = pygame.image.load(path).convert_alpha()
-        return pygame.transform.scale(image, size)
+def white_key_top_y(note_name: str, screen_h: int) -> int:
+    idx = WHITE_KEYS.index(note_name)
+    v_size = get_white_key_v_size(screen_h)
+    display_idx = len(WHITE_KEYS) - 1 - idx
 
+    return PIANO_Y_OFFSET + int(display_idx * v_size)
+
+def freq_to_note(freq: float) -> str:
+    if freq <= 0: return ""
+    try:
+        n = 12 * math.log2(freq / 440) + 49
+        n = round(n)
+        note_idx = (n + 8) % 12
+        octave = (n + 8) // 12
+        if 0 <= octave <= 8:
+            return f"{NOTE_NAMES[note_idx]}{octave}"
+    except: pass
+    return ""
+
+def get_note_y(note_name: str, screen_h: int) -> int:
+    if not note_name: return -100
+    v_size = get_white_key_v_size(screen_h)
+    is_black = "b" in note_name
+    
+    if is_black:
+        note_prefix = note_name[0:2]
+        try:
+            octave = int(note_name[2:])
+            previous_white = {
+                "Db": "C",
+                "Eb": "D",
+                "Gb": "F",
+                "Ab": "G",
+                "Bb": "A",
+            }[note_prefix]
+            previous_note = f"{previous_white}{octave}"
+            return white_key_top_y(previous_note, screen_h)
+        except: return -100
+    else:
+        try:
+            return white_key_top_y(note_name, screen_h) + int(v_size // 2)
+        except: return -100
+
+def freq_to_y(freq: float, screen_h: int) -> int:
+    note = freq_to_note(freq)
+    y = get_note_y(note, screen_h)
+    if y < 0:
+        freq_range = maximum_frequency - minimum_frequency
+        f = max(minimum_frequency, min(maximum_frequency, freq))
+        return int(screen_h - ((f - minimum_frequency) * (screen_h / freq_range)))
+    return y
+
+def load_image_or_fallback(path: str, size: tuple[int, int], fill_color: tuple[int, int, int]) -> pygame.Surface:
+    if path and os.path.exists(path):
+        try:
+            image = pygame.image.load(path).convert_alpha()
+            return pygame.transform.smoothscale(image, size)
+        except: pass
     surface = pygame.Surface(size, pygame.SRCALPHA)
     surface.fill(fill_color)
     return surface
 
+def mix_color(
+    color_a: tuple[int, int, int],
+    color_b: tuple[int, int, int],
+    amount: float,
+) -> tuple[int, int, int]:
+    return (
+        int(color_a[0] + (color_b[0] - color_a[0]) * amount),
+        int(color_a[1] + (color_b[1] - color_a[1]) * amount),
+        int(color_a[2] + (color_b[2] - color_a[2]) * amount),
+    )
 
-def draw_text(
-        surface: pygame.Surface,
-        text: str,
-        font: pygame.font.Font,
-        color: tuple[int, int, int],
-        x: int,
-        y: int,
-) -> None:
-    rendered = font.render(text, True, color)
-    surface.blit(rendered, (x, y))
+def render_space_background(w: int, h: int) -> pygame.Surface:
+    surface = pygame.Surface((w, h))
 
+    for y in range(h):
+        amount = y / max(1, h - 1)
+        pygame.draw.line(
+            surface,
+            mix_color(SPACE_TOP_COLOR, SPACE_BOTTOM_COLOR, amount),
+            (0, y),
+            (w, y),
+        )
 
-def freq_to_y(freq: float) -> int:
-    freq_range = maximum_frequency - minimum_frequency
-
-    if freq < minimum_frequency:
-        freq = minimum_frequency
-    elif freq > maximum_frequency:
-        freq = maximum_frequency
-
-    return int(SCREEN_HEIGHT - ((freq - minimum_frequency) * (SCREEN_HEIGHT / freq_range)))
-
+    return surface
 
 def seconds_to_ticks(seconds: float) -> int:
     return int(seconds * FPS)
 
-
 def play_mp3(filename: str) -> None:
     path = os.path.join(AUDIO_FOLDER, filename)
-
-    if not os.path.exists(path):
-        print(f"Missing audio file: {path}")
-        return
-
+    if not os.path.exists(path): return
+    if not pygame.mixer.get_init():
+        try:
+            pygame.mixer.init()
+        except pygame.error:
+            return
     pygame.mixer.music.load(path)
     pygame.mixer.music.play()
-
 
 def stop_mp3() -> None:
     pygame.mixer.music.stop()
 
-
+# --- CLASSES ---
 class Player(pygame.sprite.Sprite):
     def __init__(self, x: int, y: int):
         super().__init__()
+        sprite_size = player_size * 2
+        source_size = sprite_size * player_sprite_supersample
 
-        self.image = pygame.image.load(player_path).convert_alpha()
-        self.image = pygame.transform.scale(
-            self.image,
-            (player_size, player_size)
-        )
-
-        self.image = pygame.transform.rotate(self.image, -45)
-
+        # Try to load sprite, fallback to circle
+        if player_path and os.path.exists(player_path):
+            image = pygame.image.load(player_path).convert_alpha()
+            self.source_image = pygame.transform.smoothscale(image, (source_size, source_size))
+        else:
+            self.source_image = pygame.Surface((source_size, source_size), pygame.SRCALPHA)
+            pygame.draw.circle(self.source_image, player_colour, (source_size // 2, source_size // 2), source_size // 2)
+        
+        self.sprite_size = sprite_size
+        self.tilt = 0.0
+        self.image = self.render_image()
         self.rect = self.image.get_rect(center=(x, y))
         self.center_y = float(self.rect.centery)
         self.angle = 90
 
-    def update(self, new_y: float) -> None:
-        speed = 1 / movement_smoothing
-        self.center_y += (new_y - self.center_y) * speed
-        self.rect.centery = round(self.center_y)
-
-
-class PlayerTrail(pygame.sprite.Sprite):
-    def __init__(self, x: float, y: float):
-        super().__init__()
-
-        self.base_size = player_size/3
-        self.base_image = pygame.Surface((self.base_size, self.base_size), pygame.SRCALPHA)
-
-        global last_note_is_hit
-        if last_note_is_hit:
-            trail_colour = (0, 255, 0)
-        else:
-            trail_colour = base_trail_colour
-        last_note_is_hit = False
-
-        pygame.draw.circle(
-            self.base_image,
-            (*trail_colour, 200),
-            (self.base_size // 2, self.base_size // 2),
-            self.base_size // 2
+    def render_image(self) -> pygame.Surface:
+        high_res_image = pygame.transform.rotate(
+            self.source_image,
+            player_rotation + self.tilt
+        )
+        target_size = (
+            max(1, high_res_image.get_width() // player_sprite_supersample),
+            max(1, high_res_image.get_height() // player_sprite_supersample),
         )
 
-        self.x = float(x)
-        self.y = float(y)
+        return pygame.transform.smoothscale(high_res_image, target_size)
 
-        self.image = self.base_image.copy()
-        self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
+    def update(self, new_y: float, target_x: int) -> None:
+        speed = 1 / movement_smoothing
+        old_y = self.center_y
 
-    def update(self, player_y: float) -> None:
-        self.x -= movement_speed
-        self.rect = self.image.get_rect(center=(round(self.x), round(self.y)))
+        self.center_y += (new_y - self.center_y) * speed
+        y_velocity = self.center_y - old_y
 
-        if self.rect.x <= 0:
-            self.kill()
+        target_tilt = max(
+            -player_max_tilt,
+            min(player_max_tilt, -y_velocity * player_tilt_response)
+        )
+        self.tilt += (target_tilt - self.tilt) * player_tilt_smoothing
 
+        center = (target_x, round(self.center_y))
+        self.image = self.render_image()
+        self.rect = self.image.get_rect(center=center)
 
 class ToneBar(pygame.sprite.Sprite):
-    def __init__(self, y: int, note_name: str, frequency: float):
+    def __init__(self, frequency: float, note_name: str, screen_h: int, screen_w: int):
         super().__init__()
+        self.frequency = frequency
+        self.note_name = note_name
+        self.width = int(mp3_seconds * FPS * movement_speed)
+        self.is_matched = False
+        self.match_grace = 0
+        self.update_image(screen_h)
+        self.rect = self.image.get_rect(midleft=(screen_w, freq_to_y(frequency, screen_h)))
 
-        border_radius = tone_bar_height // 2
-        border_width = 2
-        border_colour = (255, 255, 255)
-        text_colour = (255, 255, 255)
+    def update_image(self, screen_h: int, matched: bool = None):
+        if matched is not None:
+            self.is_matched = matched
 
-        self.image = pygame.Surface((tone_bar_width, tone_bar_height), pygame.SRCALPHA)
+        v_size = get_white_key_v_size(screen_h)
+        # Scaled down by 25% from 3.6x -> 2.7x
+        h = max(30, int(v_size * 2.7)) 
+        self.image = pygame.Surface((self.width, h), pygame.SRCALPHA)
+        br = h // 4
+        fill_colour = tone_bar_match_colour if self.is_matched else tone_bar_colour
+        
+        pygame.draw.rect(self.image, (*fill_colour, tone_bar_alpha), (0, 0, self.width, h), border_radius=br)
+        pygame.draw.rect(self.image, (255, 255, 255, 220), (0, 0, self.width, h), width=3, border_radius=br)
+        
+        # Text size increased slightly
+        font_size = max(26, int(h * 0.5))
+        font = pygame.font.Font(None, font_size)
+        label = f"{self.note_name} - {int(self.frequency)} Hz"
+        txt = font.render(label, True, (255, 255, 255))
+        self.image.blit(txt, txt.get_rect(center=(self.width // 2, h // 2)))
 
-        # Filled rounded bar
-        pygame.draw.rect(
-            self.image,
-            (*tone_bar_colour, tone_bar_alpha),
-            (0, 0, tone_bar_width, tone_bar_height),
-            border_radius=border_radius
-        )
-
-        # Border
-        pygame.draw.rect(
-            self.image,
-            (*border_colour, tone_bar_alpha),
-            (0, 0, tone_bar_width, tone_bar_height),
-            width=border_width,
-            border_radius=border_radius
-        )
-
-        # Text inside bar
-        font = pygame.font.Font(None, 22)
-        label = f"{note_name} - {frequency} Hz"
-        text_surface = font.render(label, True, text_colour)
-        text_rect = text_surface.get_rect(center=(tone_bar_width // 2, tone_bar_height // 2))
-        self.image.blit(text_surface, text_rect)
-
-        self.rect = self.image.get_rect(midleft=(SCREEN_WIDTH-140, y))
-
-    def update(self, player_y: float) -> None:
+    def update(self, player_y: float, target_x: int, screen_h: int, input_active: bool) -> None:
         self.rect.x -= movement_speed
+        self.rect.centery = freq_to_y(self.frequency, screen_h)
+        is_at_target = self.rect.left <= target_x <= self.rect.right
+        has_live_match = (
+            input_active
+            and is_at_target
+            and abs(player_y - self.rect.centery) < (self.rect.height // 2)
+        )
+        if has_live_match:
+            self.match_grace = match_grace_frames
+        elif self.match_grace > 0:
+            self.match_grace -= 1
 
-        if SCREEN_WIDTH / 3  >= self.rect.x >= SCREEN_WIDTH / 3 - tone_bar_width:
-            global player_max_score
-            global player_score
-            global last_note_is_hit
+        is_matched = is_at_target and (has_live_match or self.match_grace > 0)
+
+        if is_matched != self.is_matched:
+            center = self.rect.center
+            self.update_image(screen_h, is_matched)
+            self.rect = self.image.get_rect(center=center)
+        
+        if is_at_target:
+            global player_max_score, player_score, last_note_is_hit
             player_max_score += 1
-            if abs(player_y - self.rect.y) < tone_delta_threshold:
+            # Dynamic threshold based on actual graphic height
+            if is_matched:
                 player_score += 1
                 last_note_is_hit = True
-            else:
-                last_note_is_hit = False
+            else: last_note_is_hit = False
+        
+        # Stop rendering when it passes the piano (WHITE_KEY_H_SIZE)
+        if self.rect.right < WHITE_KEY_H_SIZE: self.kill()
 
-        if self.rect.right < 0:
-            self.kill()
+# --- OPTIMIZED DRAWING ---
+def render_grid(w: int, h: int) -> pygame.Surface:
+    return pygame.Surface((w, h), pygame.SRCALPHA)
 
+def render_piano(w: int, h: int, active_note: str = None) -> pygame.Surface:
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+    v_size = get_white_key_v_size(h)
+    
+    # White keys
+    for note in WHITE_KEYS:
+        r = pygame.Rect(0, white_key_top_y(note, h), WHITE_KEY_H_SIZE, int(v_size))
+        color = (0, 150, 255) if note == active_note else (255, 255, 255)
+        pygame.draw.rect(surf, color, r)
+        pygame.draw.rect(surf, (180, 180, 180), r, width=1)
 
-# create player guide line
-guide_x = SCREEN_WIDTH // 3
-guide_top = 0
-guide_bottom = SCREEN_HEIGHT
+    # Black keys
+    black_v_size = int(v_size * BLACK_KEY_V_SIZE_RATIO)
+    for oct in range(0, 9):
+        for bn, previous_white in {
+            "Db": "C",
+            "Eb": "D",
+            "Gb": "F",
+            "Ab": "G",
+            "Bb": "A",
+        }.items():
+            nn = f"{bn}{oct}"
+            previous_note = f"{previous_white}{oct}"
 
-guide_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-pygame.draw.line(
-    guide_surface,
-    (180, 180, 180, 100),  # transparent gray
-    (guide_x, guide_top),
-    (guide_x, guide_bottom),
-    3,
-)
+            if previous_note not in WHITE_KEYS:
+                continue
 
-# 1. Skapa längre listor (t.ex. 4-5 oktaver totalt)
-# OCTAVE_WHITE = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "A3"]
+            y = white_key_top_y(previous_note, h) - int(black_v_size / 2)
+            r = pygame.Rect(0, y, BLACK_KEY_H_SIZE, black_v_size)
+            color = (0, 150, 255) if nn == active_note else (0, 0, 0)
+            pygame.draw.rect(surf, color, r); pygame.draw.rect(surf, (60, 60, 60), r, width=1)
+    return surf
 
+def draw_frequency_indicator(
+    screen: pygame.Surface,
+    frequency: float = None,
+    strength: float = 0.0,
+) -> None:
+    screen_w, screen_h = screen.get_size()
+    overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    width = max(1, screen_w - WHITE_KEY_H_SIZE)
+    start_x = WHITE_KEY_H_SIZE
+    y = max(90, screen_h // 7)
+    points = []
+    has_frequency = frequency is not None
+    phase = pygame.time.get_ticks() * 0.008
+    amplitude = 42 * max(0.0, min(1.0, strength))
+    frequency_amount = (
+        max(0.0, min(1.0, (frequency - minimum_frequency) / (maximum_frequency - minimum_frequency)))
+        if has_frequency
+        else 0.0
+    )
+    wave_density = 0.035 + frequency_amount * 0.075
 
-WHITE_KEYS = [
-    "A0", "B0",
-    "C1", "D1", "E1", "F1", "A1", "B1",
-    "C2", "D2", "E2", "F2", "A2", "B2",
-    "C3", "D3", "E3", "F3", "A3", "B3",
-    "C4", "D4", "E4", "F4", "A4", "B4",
-    "C5", "D5", "E5", "F5", "A5", "B5",
-    "C6", "D6", "E6", "F6", "A6", "B6",
-    "C7", "D7", "E7", "F7", "A7", "B7"
-]
-
-BLACK_KEYS = [
-    "Db4", "Eb4", "Gb4", "Ab4", "Bb4",
-    "Db5", "Eb5", "Gb5", "Ab5", "Bb5",
-    "Db6", "Eb6", "Gb6", "Ab6", "Bb6",
-    "Db7", "Eb7", "Gb7", "Ab7", "Bb7"
-]
-
-
-# Vi multiplicerar så vi får ett rejält omfång (t.ex. 5 oktaver)
-# WHITE_KEYS = OCTAVE_WHITE * 5
-# BLACK_KEYS = OCTAVE_BLACK * 5
-
-
-def draw_piano(screen, active_note):
-    piano_margin_right = int(SCREEN_WIDTH * 0.02)
-    piano_margin_top = int(SCREEN_HEIGHT * 0.02)
-    piano_margin_bottom = int(SCREEN_HEIGHT * 0.02)
-
-    available_height = SCREEN_HEIGHT - piano_margin_top - piano_margin_bottom
-
-    white_key_width = available_height / len(WHITE_KEYS)
-    white_key_height = int(SCREEN_WIDTH * 0.09)
-
-    black_key_width = int(white_key_width * 0.6)
-    black_key_height = int(white_key_height * 0.65)
-
-    piano_x = SCREEN_WIDTH - white_key_height - piano_margin_right
-    piano_y = piano_margin_top
-
-    # Rita vita tangenter
-    for i, note in enumerate(WHITE_KEYS):
-        key_y = piano_y + int(i * white_key_width)
-
-        rect = pygame.Rect(
-            piano_x,
-            key_y,
-            white_key_height,
-            math.ceil(white_key_width)
+    for i in range(width + 1):
+        edge_fade = math.sin((i / width) * math.pi)
+        wave = (
+            math.sin(i * wave_density + phase) * 0.86
+            + math.sin(i * wave_density * 2.0 - phase * 0.7) * 0.14
         )
+        points.append((start_x + i, y + int(wave * amplitude * edge_fade)))
 
-        color = (255, 255, 255)
-        if note == active_note:
-            color = (0, 100, 255)
+    for offset, color, line_width in [
+        (4, (70, 40, 255, 12), 6),
+        (2, (95, 95, 255, 24), 4),
+        (0, (155, 230, 255, 105), 1),
+    ]:
+        shifted_points = [(px, py + offset) for px, py in points]
+        pygame.draw.lines(overlay, color, False, shifted_points, line_width)
 
-        pygame.draw.rect(screen, color, rect)
-        pygame.draw.rect(screen, (0, 0, 0), rect, width=1)
-
-    # Rita svarta tangenter
-    black_note_names = ["Db", "Eb", "Gb", "Ab", "Bb"]
-    black_offsets = [0.7, 1.7, 3.7, 4.7, 5.7]
-
-    for octave in range(1, 8):
-        for i in range(5):
-            note_name = f"{black_note_names[i]}{octave}"
-
-            rel_pos = black_offsets[i] + ((octave - 1) * 7) + 2
-            key_y = piano_y + int(rel_pos * white_key_width)
-
-            rect = pygame.Rect(
-                piano_x,
-                key_y,
-                black_key_height,
-                black_key_width
-            )
-
-            color = (0, 0, 0)
-            if note_name == active_note:
-                color = (0, 100, 255)
-
-            pygame.draw.rect(screen, color, rect)
-            pygame.draw.rect(screen, (60, 60, 60), rect, width=1)
-
+    screen.blit(overlay, (0, 0))
 
 def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bool:
     pygame.display.set_caption(f"Frequency game - {microphone['name']}")
+    
+    def refresh_layout():
+        w, h = screen.get_size()
+        if background_path:
+            bg = load_image_or_fallback(background_path, (w, h), BACKGROUND_COLOR)
+        else:
+            bg = render_space_background(w, h)
+        return w, h, bg
 
-    background = load_image_or_fallback(
-        background_path,
-        (SCREEN_WIDTH, SCREEN_HEIGHT),
-        BACKGROUND_COLOR,
-    )
-
-    player_group = pygame.sprite.Group()
-    player = Player(int(SCREEN_WIDTH / 3), int(SCREEN_HEIGHT / 3))
-
-    player_trail_group = pygame.sprite.Group()
+    w, h, background = refresh_layout()
+    cached_grid = render_grid(w, h)
+    cached_piano = render_piano(w, h, None)
+    
+    player = Player(w // 3, h // 3)
     tone_bar_group = pygame.sprite.Group()
-
-    audio = SoundReader()
-    game_info_font = pygame.font.Font(None, 25)
+    audio = SoundReader(
+        device=microphone["index"],
+        min_hz=minimum_frequency,
+    )
     big_font = pygame.font.Font(None, 40)
+    cta_font = pygame.font.Font(None, 48)
 
     player_visible = False
-    game_event_active = True
-
-    game_state = 0
-    pause_timer = 0
-    notes_sent = 0
-
-    mp3_ticks = 0
-    between_mp3_ticks = 0
-    none_ticks = 0
-
+    game_state = 0; notes_sent = 0; mp3_ticks = 0; pause_timer = 0; none_ticks = 0
+    exhaust_particles = []; last_active_note = None
+    displayed_wave_frequency = None
+    displayed_wave_strength = 0.0
+    
     global player_score, player_max_score, last_player_score, last_note_is_hit
-    ticks_until_invisible = seconds_to_ticks(seconds_until_invisible)
-
+    player_score = 0; player_max_score = 0
+    
     available_sounds = list(piano_frequencies.keys())
     random.shuffle(available_sounds)
 
     try:
-        audio.start()
-        audio.start_listening()
-        active_note = None
-
+        audio.start(); audio.start_listening()
         while True:
             clock.tick(FPS)
+            w, h = screen.get_size(); target_x = w // 3
+            current_freq = audio.get_latest_frequency() if mp3_ticks <= 0 else None
+            current_note = freq_to_note(current_freq) if current_freq else None
 
-            if mp3_ticks <= 0 and between_mp3_ticks <= 0:
-                current_frequency = audio.get_latest_frequency()
+            if current_freq is None:
+                displayed_wave_frequency = None
+            elif displayed_wave_frequency is None:
+                displayed_wave_frequency = current_freq
             else:
-                current_frequency = abs(minimum_frequency-maximum_frequency)/2
+                displayed_wave_frequency += (
+                    current_freq - displayed_wave_frequency
+                ) * wave_frequency_smoothing
+
+            target_wave_strength = 1.0 if current_freq is not None else 0.0
+            displayed_wave_strength += (
+                target_wave_strength - displayed_wave_strength
+            ) * wave_amplitude_smoothing
+
+            if current_note != last_active_note:
+                cached_piano = render_piano(w, h, current_note)
+                last_active_note = current_note
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: return False
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE: return True
+                if event.type == pygame.VIDEORESIZE:
+                    w, h, background = refresh_layout()
+                    cached_grid = render_grid(w, h)
+                    cached_piano = render_piano(w, h, current_note)
+                    for tb in tone_bar_group: tb.update_image(h)
 
-            # --- POÄNGUPPDATERING I REALTID ---
-            if player_max_score > 0:
-                last_player_score = float((player_score / player_max_score) * 100)
+            if player_max_score > 0: last_player_score = (player_score / player_max_score) * 100
+            else: last_player_score = 0
+
+            if game_state == 0:
+                if mp3_ticks <= 0:
+                    if notes_sent < max_notes:
+                        if not available_sounds:
+                            available_sounds = list(piano_frequencies.keys()); random.shuffle(available_sounds)
+                        note = available_sounds.pop(); freq = piano_frequencies[note]
+                        tone_bar_group.add(ToneBar(freq, note, h, w))
+                        play_mp3(f"{note}.mp3")
+                        mp3_ticks = seconds_to_ticks(mp3_seconds + between_mp3_seconds)
+                        notes_sent += 1
+                    else: game_state = 1
+            elif game_state == 1:
+                if len(tone_bar_group) == 0:
+                    final_score = last_player_score; player_score, player_max_score, notes_sent = 0, 0, 0
+                    pause_timer = seconds_to_ticks(7); game_state = 2
+            elif game_state == 2:
+                pause_timer -= 1
+                if pause_timer <= 0: last_player_score, game_state = 0, 0
+
+            if mp3_ticks > 0:
+                mp3_ticks -= 1
+                if mp3_ticks == 0: stop_mp3()
+
+            if current_freq is not None:
+                none_ticks = 0; player_visible = True
+                player.update(freq_to_y(current_freq, h), target_x)
             else:
-                last_player_score = 0
-
-            # --- AUTOMATISERAD SPELLOGIK ---
-            if game_event_active:
-                if game_state == 0:
-                    if mp3_ticks <= 0 and between_mp3_ticks <= 0:
-                        if notes_sent < max_notes:
-                            if not available_sounds:
-                                available_sounds = list(piano_frequencies.keys())
-                                random.shuffle(available_sounds)
-                            current_note = available_sounds.pop()
-                            active_note = current_note
-                            freq_val = piano_frequencies[current_note]
-                            tone_bar = ToneBar(freq_to_y(freq_val), current_note, freq_val)
-                            tone_bar_group.add(tone_bar)
-                            play_mp3(f"{current_note}.mp3")
-                            mp3_ticks = seconds_to_ticks(mp3_seconds)
-                            between_mp3_ticks = seconds_to_ticks(between_mp3_seconds)
-                            notes_sent += 1
-                        else:
-                            game_state = 1
-
-
-                elif game_state == 1:
-                    # Vänta tills alla noter åkt förbi innan vi pausar
-                    if len(tone_bar_group) == 0:
-                        # Här sparar vi slutresultatet för visning i rutan
-                        final_round_score = last_player_score
-
-                        # Vi nollställer INTE last_player_score här förrän pausen är slut
-                        # Men vi nollställer räknarna för nästa runda
-                        player_score, player_max_score = 0, 0
-                        notes_sent = 0
-                        active_note, current_note = None, None
-                        pause_timer = seconds_to_ticks(10)
-                        game_state = 2
-
-
-                elif game_state == 2:
-                    pause_timer -= 1
-                    if pause_timer <= 0:
-                        last_player_score = 0  # Nollställ inför nästa aktiva runda
-                        game_state = 0
-
-                if mp3_ticks > 0:
-                    mp3_ticks -= 1
-                    if mp3_ticks == 0: stop_mp3()
-                if between_mp3_ticks > 0:
-                    between_mp3_ticks -= 1
-
-            # --- LOGIK FÖR SPELARE ---
-            if current_frequency is None:
                 none_ticks += 1
-                if none_ticks >= ticks_until_invisible and player_visible:
-                    player_group.remove(player)
-                    player_visible = False
-            else:
-                none_ticks = 0
-                if not player_visible:
-                    player_group.add(player)
-                    player_visible = True
-                player.update(freq_to_y(current_frequency))
+                if not test_mode and none_ticks >= seconds_to_ticks(seconds_until_invisible): player_visible = False
+
+            if test_mode:
+                player_visible = True
+
+            input_active = current_freq is not None
+            tone_bar_group.update(player.rect.centery, target_x, h, input_active)
+
+            matching_tone = any(
+                input_active
+                and
+                tone_bar.rect.left <= target_x <= tone_bar.rect.right
+                and abs(player.rect.centery - tone_bar.rect.centery) < (tone_bar.rect.height // 2)
+                for tone_bar in tone_bar_group
+            )
 
             if player_visible:
-                player_trail = PlayerTrail(int(SCREEN_WIDTH / 3), int(player.rect.y + player.rect.height / 2))
-                player_trail_group.add(player_trail)
+                exhaust_x = player.rect.left + player.rect.width * 0.18
+                exhaust_y = player.rect.centery
+                exhaust_matched = matching_tone
+                exhaust_color = (0, 255, 100) if matching_tone else (255, 150, 40)
 
-            player_trail_group.update(player.rect.y)
-            tone_bar_group.update(player.rect.y)
+                for _ in range(exhaust_particles_per_frame):
+                    offset_x = random.uniform(-4, 10)
+                    exhaust_particles.append({
+                        "x": exhaust_x + offset_x,
+                        "y": exhaust_y + random.uniform(-exhaust_spread, exhaust_spread) * (1 - max(0, offset_x) / 14),
+                        "age": 0,
+                        "life": exhaust_lifetime + random.randint(-12, 12),
+                        "radius": random.uniform(exhaust_start_radius * 0.35, exhaust_start_radius),
+                        "drift": random.uniform(-0.45, 0.45),
+                        "color": exhaust_color,
+                        "matched": exhaust_matched,
+                    })
 
-            # --- RITNING ---
+            new_particles = []
+            for particle in exhaust_particles:
+                particle["age"] += 1
+                particle["x"] -= movement_speed
+                particle["y"] += particle["drift"]
+                particle["drift"] *= 0.98
+
+                if (
+                    particle["age"] < particle["life"]
+                    and particle["x"] > WHITE_KEY_H_SIZE
+                ):
+                    new_particles.append(particle)
+
+            exhaust_particles = new_particles[-exhaust_max_particles:]
+
+            # --- RENDER ---
             screen.blit(background, (0, 0))
-            pygame.draw.line(
-                screen,
-                (180, 180, 180),
-                (SCREEN_WIDTH // 3, 0),
-                (SCREEN_WIDTH // 3, SCREEN_HEIGHT),
-                3
-            )
+            screen.blit(cached_grid, (0, 0)) # Grid is furthest back
+
+            pygame.draw.line(screen, (100, 100, 100), (target_x, 0), (target_x, h), 2)
+            
+            # Notes above grid
             tone_bar_group.draw(screen)
-            player_trail_group.draw(screen)
-            player_group.draw(screen)
 
-            # --- PAUS-RUTA ---
+            draw_frequency_indicator(
+                screen,
+                displayed_wave_frequency,
+                displayed_wave_strength,
+            )
+            
+            # Exhaust above notes
+            if exhaust_particles:
+                exhaust_surface = pygame.Surface((w, h), pygame.SRCALPHA)
+
+                for particle in exhaust_particles:
+                    progress = particle["age"] / particle["life"]
+                    taper = (1 - progress) ** 1.7
+                    radius = max(1, int(particle["radius"] * taper))
+                    alpha = max(0, int(225 * (1 - progress) ** 1.35))
+
+                    if particle["matched"]:
+                        if progress < 0.28:
+                            color = (185, 255, 190)
+                        elif progress < 0.75:
+                            color = particle["color"]
+                        else:
+                            fade = int(95 * (1 - progress))
+                            color = (20, max(35, fade + 45), 35)
+                    elif progress < 0.28:
+                        color = (255, 245, 170)
+                    elif progress < 0.62:
+                        color = particle["color"]
+                    else:
+                        smoke = int(120 * (1 - progress))
+                        color = (smoke, smoke, smoke + 20)
+
+                    pygame.draw.circle(
+                        exhaust_surface,
+                        (*color, alpha),
+                        (int(particle["x"]), int(particle["y"])),
+                        radius,
+                    )
+
+                screen.blit(exhaust_surface, (0, 0))
+            
+            if player_visible: screen.blit(player.image, player.rect)
+            
+            # Piano is on top
+            screen.blit(cached_piano, (0, 0))
+            
+            cta_surf = cta_font.render("Matcha tonen!", True, (255, 255, 255))
+            screen.blit(cta_surf, (w // 2 - cta_surf.get_width() // 2, 20))
+            score_surf = big_font.render(f"Match: {last_player_score:.0f}%", True, (255, 255, 255))
+            screen.blit(score_surf, (w - score_surf.get_width() - 40, 20))
+
             if game_state == 2:
-                r_w, r_h = 600, 300
-                r_x, r_y = (SCREEN_WIDTH // 2) - (r_w // 2), (SCREEN_HEIGHT // 2) - (r_h // 2)
-
+                r_w, r_h = 600, 300; r_x, r_y = (w // 2) - (r_w // 2), (h // 2) - (r_h // 2)
                 pygame.draw.rect(screen, (255, 255, 255), (r_x, r_y, r_w, r_h), border_radius=20)
                 pygame.draw.rect(screen, (0, 0, 0), (r_x, r_y, r_w, r_h), 4, border_radius=20)
-
-                # Batteriet visar slutresultatet
-                bat_w, bat_h = 500, 50
-                bat_x, bat_y = r_x + (r_w // 2 - bat_w // 2), r_y + 140
-                pygame.draw.rect(screen, (0, 0, 0), (bat_x, bat_y, bat_w, bat_h), 4)
-                pygame.draw.rect(screen, (0, 0, 0), (bat_x + bat_w, bat_y + 12, 12, 25))
-
-                # Använder final_round_score här för att frysa batteriet under pausen
-                fill_w = int((final_round_score / 100) * (bat_w - 8))
-                if fill_w > 0:
-                    pygame.draw.rect(screen, (50, 205, 50), (bat_x + 4, bat_y + 4, fill_w, bat_h - 8))
-
-                sec = math.ceil(pause_timer / FPS)
+                bar_w, bar_h = 500, 40; bar_x, bar_y = r_x + 50, r_y + 140
+                pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_w, bar_h))
+                fill_w = int((final_score / 100) * bar_w)
+                if fill_w > 0: pygame.draw.rect(screen, (50, 205, 50), (bar_x, bar_y, fill_w, bar_h))
                 t1 = big_font.render("Snyggt jobbat!", True, (255, 100, 0))
-                t2 = big_font.render(f"Du matchade {final_round_score:.0f}% av tonerna!", True, (0, 0, 0))
-                t3 = game_info_font.render(f"Nästa runda börjar om: {sec}s", True, (150, 150, 150))
-
-                screen.blit(t1, (r_x + (r_w // 2 - t1.get_width() // 2), r_y + 40))
-                screen.blit(t2, (r_x + (r_w // 2 - t2.get_width() // 2), r_y + 90))
-                screen.blit(t3, (r_x + (r_w // 2 - t3.get_width() // 2), r_y + 230))
-
-            draw_piano(screen, active_note)
+                t2 = big_font.render(f"Match: {final_score:.0f}%", True, (0, 0, 0))
+                sec = math.ceil(pause_timer / FPS)
+                t3 = big_font.render(f"Nästa runda om: {sec}s", True, (100, 100, 100))
+                screen.blit(t1, (r_x + r_w // 2 - t1.get_width() // 2, r_y + 40))
+                screen.blit(t2, (r_x + r_w // 2 - t2.get_width() // 2, r_y + 90))
+                screen.blit(t3, (r_x + r_w // 2 - t3.get_width() // 2, r_y + 230))
             pygame.display.flip()
 
-
     finally:
-        stop_mp3()
-        audio.stop()
-
+        stop_mp3(); audio.stop()

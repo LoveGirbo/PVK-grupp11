@@ -248,6 +248,7 @@ class Player(pygame.sprite.Sprite):
         self.image = self.render_image()
         self.rect = self.image.get_rect(center=(x, y))
         self.center_y = float(self.rect.centery)
+        self.angle = 90
 
     def render_image(self) -> pygame.Surface:
         high_res_image = pygame.transform.rotate(

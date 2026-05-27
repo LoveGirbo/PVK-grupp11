@@ -32,13 +32,21 @@ player_tilt_smoothing = 0.25
 player_colour = (240, 240, 20)
 player_path = "images/Player_sprite.png" # Example sprite path
 
+# Exhaust visuals
+exhaust_particles_per_frame = 4
+exhaust_max_particles = 360
+exhaust_lifetime = 140
+exhaust_start_radius = 14
+exhaust_spread = 14
+
 # Tone bar visuals
 tone_bar_alpha = 200 # More solid
 tone_bar_colour = (0, 204, 255)
+tone_bar_match_colour = (0, 220, 90)
 
 # Audio
-minimum_frequency = 180.0
-maximum_frequency = 610.0
+minimum_frequency = 100.0
+maximum_frequency = 910.0
 dB_threshold = 50.0
 AUDIO_FOLDER = "audio"
 background_path = ""
@@ -186,17 +194,22 @@ class ToneBar(pygame.sprite.Sprite):
         self.frequency = frequency
         self.note_name = note_name
         self.width = int(mp3_seconds * FPS * movement_speed)
+        self.is_matched = False
         self.update_image(screen_h)
         self.rect = self.image.get_rect(midleft=(screen_w, freq_to_y(frequency, screen_h)))
 
-    def update_image(self, screen_h: int):
+    def update_image(self, screen_h: int, matched: bool = None):
+        if matched is not None:
+            self.is_matched = matched
+
         v_size = get_white_key_v_size(screen_h)
         # Scaled down by 25% from 3.6x -> 2.7x
         h = max(30, int(v_size * 2.7)) 
         self.image = pygame.Surface((self.width, h), pygame.SRCALPHA)
         br = h // 4
+        fill_colour = tone_bar_match_colour if self.is_matched else tone_bar_colour
         
-        pygame.draw.rect(self.image, (*tone_bar_colour, tone_bar_alpha), (0, 0, self.width, h), border_radius=br)
+        pygame.draw.rect(self.image, (*fill_colour, tone_bar_alpha), (0, 0, self.width, h), border_radius=br)
         pygame.draw.rect(self.image, (255, 255, 255, 220), (0, 0, self.width, h), width=3, border_radius=br)
         
         # Text size increased slightly
@@ -209,12 +222,19 @@ class ToneBar(pygame.sprite.Sprite):
     def update(self, player_y: float, target_x: int, screen_h: int) -> None:
         self.rect.x -= movement_speed
         self.rect.centery = freq_to_y(self.frequency, screen_h)
+        is_at_target = self.rect.left <= target_x <= self.rect.right
+        is_matched = is_at_target and abs(player_y - self.rect.centery) < (self.rect.height // 2)
+
+        if is_matched != self.is_matched:
+            center = self.rect.center
+            self.update_image(screen_h, is_matched)
+            self.rect = self.image.get_rect(center=center)
         
-        if self.rect.left <= target_x <= self.rect.right:
+        if is_at_target:
             global player_max_score, player_score, last_note_is_hit
             player_max_score += 1
             # Dynamic threshold based on actual graphic height
-            if abs(player_y - self.rect.centery) < (self.rect.height // 2):
+            if is_matched:
                 player_score += 1
                 last_note_is_hit = True
             else: last_note_is_hit = False
@@ -275,7 +295,7 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
 
     player_visible = False
     game_state = 0; notes_sent = 0; mp3_ticks = 0; pause_timer = 0; none_ticks = 0
-    player_trail_points = []; last_active_note = None
+    exhaust_particles = []; last_active_note = None
     
     global player_score, player_max_score, last_player_score, last_note_is_hit
     player_score = 0; player_max_score = 0
@@ -337,14 +357,44 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
                 none_ticks += 1
                 if none_ticks >= seconds_to_ticks(seconds_until_invisible): player_visible = False
 
-            if player_visible: player_trail_points.insert(0, (target_x, player.rect.centery))
-            new_trail = []
-            for (tx, ty) in player_trail_points:
-                nx = tx - movement_speed
-                # Boundary check: Stop rendering trail when it hits the piano
-                if nx > WHITE_KEY_H_SIZE: new_trail.append((nx, ty))
-            player_trail_points = new_trail[:400]
             tone_bar_group.update(player.rect.centery, target_x, h)
+
+            matching_tone = any(
+                tone_bar.rect.left <= target_x <= tone_bar.rect.right
+                and abs(player.rect.centery - tone_bar.rect.centery) < (tone_bar.rect.height // 2)
+                for tone_bar in tone_bar_group
+            )
+
+            if player_visible:
+                exhaust_x = player.rect.left + player.rect.width * 0.18
+                exhaust_y = player.rect.centery
+                exhaust_color = (0, 255, 100) if matching_tone else (255, 150, 40)
+
+                for _ in range(exhaust_particles_per_frame):
+                    exhaust_particles.append({
+                        "x": exhaust_x + random.uniform(-4, 4),
+                        "y": exhaust_y + random.uniform(-exhaust_spread, exhaust_spread),
+                        "age": 0,
+                        "life": exhaust_lifetime + random.randint(-12, 12),
+                        "radius": random.uniform(exhaust_start_radius * 0.45, exhaust_start_radius),
+                        "drift": random.uniform(-0.7, 0.7),
+                        "color": exhaust_color,
+                    })
+
+            new_particles = []
+            for particle in exhaust_particles:
+                particle["age"] += 1
+                particle["x"] -= movement_speed
+                particle["y"] += particle["drift"]
+                particle["drift"] *= 0.98
+
+                if (
+                    particle["age"] < particle["life"]
+                    and particle["x"] > WHITE_KEY_H_SIZE
+                ):
+                    new_particles.append(particle)
+
+            exhaust_particles = new_particles[-exhaust_max_particles:]
 
             # --- RENDER ---
             screen.blit(background, (0, 0))
@@ -356,10 +406,31 @@ def run_game(screen: pygame.Surface, clock: pygame.time.Clock, microphone) -> bo
             # Notes above grid
             tone_bar_group.draw(screen)
             
-            # Trail above notes
-            if len(player_trail_points) > 1:
-                color = (0, 255, 100) if last_note_is_hit else player_colour
-                pygame.draw.lines(screen, color, False, player_trail_points, 5)
+            # Exhaust above notes
+            if exhaust_particles:
+                exhaust_surface = pygame.Surface((w, h), pygame.SRCALPHA)
+
+                for particle in exhaust_particles:
+                    progress = particle["age"] / particle["life"]
+                    radius = max(1, int(particle["radius"] * (1 - progress)))
+                    alpha = max(0, int(210 * (1 - progress) ** 1.6))
+
+                    if progress < 0.28:
+                        color = (255, 245, 170)
+                    elif progress < 0.62:
+                        color = particle["color"]
+                    else:
+                        smoke = int(120 * (1 - progress))
+                        color = (smoke, smoke, smoke + 20)
+
+                    pygame.draw.circle(
+                        exhaust_surface,
+                        (*color, alpha),
+                        (int(particle["x"]), int(particle["y"])),
+                        radius,
+                    )
+
+                screen.blit(exhaust_surface, (0, 0))
             
             if player_visible: screen.blit(player.image, player.rect)
             

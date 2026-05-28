@@ -1,40 +1,108 @@
 # Frequency Game
 
-A small pygame pitch-matching game. The app plays piano notes, listens to the
-selected microphone, and scores how closely the incoming pitch follows the note
-bars on screen.
+Ett interaktivt frekvens-spel byggt med Python och pygame. Spelet spelar upp
+pianotoner, lyssnar på spelarens röst via mikrofonen och låter spelaren styra
+en raket genom att matcha tonhöjden.
 
-## Setup
+## Vad Spelet Gör
+
+- Spelar upp en pianoton från mappen `audio/`.
+- Skapar en blå ruta som rör sig från höger till vänster.
+- Läser av aktuell frekvens från mikrofonen.
+- Flyttar raketen uppåt/nedåt beroende på spelarens tonhöjd.
+- Ger poäng när raketen matchar tonen vid den vertikala linjen.
+- Visar gröna avgaser när spelaren matchar tonen.
+
+## Installation
+
+Installera paket:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
 pip install pygame sounddevice numpy
 ```
 
-## Run
+På vissa datorer kan `sounddevice` kräva att PortAudio finns installerat.
+På macOS kan det installeras med Homebrew:
 
-Start the game with:
+```bash
+brew install portaudio
+```
+
+## Starta Programmet
+
+Kör:
 
 ```bash
 python3 main.py
 ```
 
-Choose a microphone from the menu with the arrow keys or mouse, then press
-Enter, Space, or the Start button.
+Välj mikrofon i menyn med piltangenterna eller musen och starta med Enter,
+Space eller Start-knappen.
 
-## Controls
+## Kontroller
 
-- `Up` / `Down`: choose a microphone in the menu
-- `Mouse wheel`: scroll through microphones
-- `R`: refresh the microphone list
-- `Enter` / `Space`: start with the selected microphone
-- `Esc`: return from the game to the microphone menu, or quit from the menu
+- `Up` / `Down`: välj mikrofon i menyn
+- `Mouse wheel`: scrolla i mikrofonlistan
+- `R`: uppdatera mikrofonlistan
+- `Enter` / `Space`: starta spelet med vald mikrofon
+- `Esc`: gå tillbaka från spelet till menyn, eller avsluta från menyn
 
-## Project Files
+## Projektets Viktiga Filer
 
-- `main.py`: application loop
-- `menu.py`: microphone selection screen
-- `game.py`: game rendering, scoring, and note spawning
-- `audio_reader.py`: live microphone pitch detection
-- `audio/`: note playback files
+- `main.py`: startar pygame, öppnar fönstret och växlar mellan meny och spel.
+- `menu.py`: visar mikrofonmenyn och låter användaren välja input.
+- `game.py`: innehåller själva spelet, raketen, tonbalkarna, poängräkning och grafik.
+- `audio_reader.py`: läser mikrofonljud och räknar ut aktuell frekvens i Hz.
+- `audio/`: innehåller pianoljudfiler som `C4.mp3`, `A4.mp3` osv.
+- `images/Player_sprite.png`: raketbilden som används som spelare.
+
+## Vanliga Inställningar
+
+De flesta spelinställningar finns högst upp i `game.py`.
+
+Bra variabler att känna till:
+
+- `test_mode`: sätt till `True` om raketen alltid ska synas vid test.
+- `max_notes`: antal noter per runda.
+- `piano_frequencies`: vilka noter som kan spawna som tonbalkar.
+- `VISIBLE_LOW_NOTE` / `VISIBLE_HIGH_NOTE`: vilket pianoregister som visas.
+- `minimum_frequency` / `maximum_frequency`: frekvensspannet som visas i spelet.
+- `movement_smoothing`: hur mjukt raketen följer mikrofonen.
+- `match_grace_frames`: hur snällt spelet är efter en korrekt matchning.
+- `wave_frequency_smoothing`: hur mjukt ljudvågen byter form mellan toner.
+- `wave_amplitude_smoothing`: hur mjukt ljudvågen går mellan platt och aktiv.
+
+## Lägga Till Eller Ändra Toner
+
+Tonerna väljs från `piano_frequencies` i `game.py`.
+
+Exempel:
+
+```python
+piano_frequencies = {
+    "C4": 261.63,
+    "D4": 293.66,
+}
+```
+
+Viktigt: varje not i `piano_frequencies` måste ha en matchande ljudfil i
+`audio/`. Om spelet ska spawna `C4` måste filen `audio/C4.mp3` finnas.
+
+## Felsökning
+
+Om ingen mikrofon syns:
+
+- Kontrollera att datorn har gett terminalen/Python mikrofontillgång.
+- Tryck `R` i mikrofonmenyn för att läsa om listan.
+- Testa en annan mikrofon.
+
+Om raketen inte rör sig:
+
+- Kontrollera att rätt mikrofon valts.
+- Testa att sjunga/humma tydligare och närmare mikrofonen.
+- Se över `gate_db` i `audio_reader.py` om mikrofonen är väldigt tyst.
+
+Om en ton inte spelas:
+
+- Kontrollera att ljudfilen finns i `audio/`.
+- Filnamnet måste matcha noten exakt, till exempel `Db4.mp3`.

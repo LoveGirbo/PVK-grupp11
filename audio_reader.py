@@ -6,6 +6,8 @@ import sounddevice as sd
 
 
 def list_input_devices():
+    # Returnerar alla ljudenheter som kan anvandas som mikrofon.
+    # Menyn anvander listan sa att anvandaren kan valja ratt input.
     devices = sd.query_devices()
     microphones = []
 
@@ -24,6 +26,8 @@ def list_input_devices():
 
 
 def rms_dbfs(x: np.ndarray) -> float:
+    # Matar hur stark signalen ar. Om signalen ar for svag ignoreras den
+    # senare, vilket minskar risken att bakgrundsbrus blir en "ton".
     rms = float(np.sqrt(np.mean(x * x)))
     return 20.0 * np.log10(rms + 1e-12)
 
@@ -41,6 +45,8 @@ def dominant_freq_hz(
     nfft: Optional[int],
     min_hz: float,
 ) -> float:
+    # Hittar den starkaste frekvensen i ett kort ljudblock.
+    # Detta ar pitch-detekteringen som gor om mikrofonljud till Hz.
     x = block.astype(np.float64, copy=False)
     x = x - np.mean(x)
 
@@ -86,6 +92,8 @@ def dominant_freq_hz(
 
 
 class SoundReader:
+    # SoundReader kor mikrofonen i bakgrunden. Spelet fragar bara efter
+    # senaste upptackta frekvens med get_latest_frequency().
     def __init__(
         self,
         device=None,
@@ -131,12 +139,14 @@ class SoundReader:
         self.stream.close()
 
     def start_listening(self):
+        # Borja uppdatera latest_frequency fran mikrofonens callback.
         with self.lock:
             self.active = True
             self.latest_frequency = None
             self.latest_db = None
 
     def stop_listening(self):
+        # Sluta lyssna och nollstall senaste varden.
         with self.lock:
             self.active = False
             self.latest_frequency = None
@@ -151,6 +161,8 @@ class SoundReader:
             return self.latest_db
 
     def _audio_callback(self, indata, frames, time_info, status):
+        # Denna funktion anropas automatiskt av sounddevice varje gang ett
+        # nytt ljudblock kommer fran mikrofonen.
         mono = indata[:, 0].copy()
         level_db = rms_dbfs(mono)
 

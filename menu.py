@@ -26,8 +26,8 @@ def draw_text(
 
 
 def fit_text(text: str, font: pygame.font.Font, max_width: int) -> str:
-    # Mikrofonnamn kan vara valdigt langa. Den har funktionen kortar texten
-    # med "..." sa att den inte rinner utanfor raden i menyn.
+    # Mikrofonnamn kan vara väldigt långa. Den här funktionen kortar texten
+    # med "..." så att den inte rinner utanför raden i menyn.
     if font.size(text)[0] <= max_width:
         return text
 
@@ -45,8 +45,8 @@ def fit_text(text: str, font: pygame.font.Font, max_width: int) -> str:
 
 
 def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
-    # Den har funktionen ar en egen liten "skarm" som kor tills anvandaren
-    # antingen valjer en mikrofon eller avslutar med Esc/kryss.
+    # Den här funktionen är en egen liten "skärm" som kör tills användaren
+    # antingen väljer en mikrofon eller avslutar med Esc/kryss.
     pygame.display.set_caption("Frequency game - microphone selection")
 
     title_font = pygame.font.Font(None, 52)
@@ -60,7 +60,7 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
     while True:
         clock.tick(FPS)
 
-        # Menyn anpassar sig efter aktuell fonsterstorlek varje frame.
+        # Menyn anpassar sig efter aktuell fönsterstorlek varje frame.
         screen_w, screen_h = screen.get_size()
         list_top = 140
         item_height = 48
@@ -84,7 +84,7 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
             item_rects.append((rect, scroll_offset + i))
 
         for event in pygame.event.get():
-            # Event ar tangenttryck, musklick, scrollhjul, fonsterstangning osv.
+            # Event är tangenttryck, musklick, scrollhjul, fönsterstängning osv.
             if event.type == pygame.QUIT:
                 return None
 
@@ -93,7 +93,7 @@ def choose_microphone(screen: pygame.Surface, clock: pygame.time.Clock):
                     return None
 
                 if event.key == pygame.K_r:
-                    # R laser om listan om en ny mikrofon kopplats in.
+                    # R läser om listan om en ny mikrofon kopplats in.
                     devices = list_input_devices()
                     if devices:
                         selected = min(selected, len(devices) - 1)

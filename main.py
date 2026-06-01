@@ -5,30 +5,30 @@ from game import run_game, SCREEN_WIDTH, SCREEN_HEIGHT
 
 
 def main() -> None:
-    # Pygame maste startas innan fonster, bilder, ljud och fonter kan anvandas.
+    # Pygame måste startas innan fönster, bilder, ljud och fonter kan användas.
     pygame.init()
 
-    # RESIZABLE gor att anvandaren kan andra fonsterstorlek.
-    # Spelet raknar om layouten nar fonstret andras.
+    # RESIZABLE gör att användaren kan ändra fönsterstorlek.
+    # Spelet räknar om layouten när fönstret ändras.
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
     clock = pygame.time.Clock()
 
     running = True
 
     while running:
-        # Forst visas en meny dar anvandaren valjer mikrofon.
+        # Först visas en meny där användaren väljer mikrofon.
         microphone = choose_microphone(screen, clock)
 
         if microphone is None:
             running = False
         else:
-            # run_game returnerar True om anvandaren trycker Esc for att ga
+            # run_game returnerar True om användaren trycker Esc för att gå
             # tillbaka till mikrofonmenyn, och False om hela programmet ska sluta.
             back_to_menu = run_game(screen, clock, microphone)
             if not back_to_menu:
                 running = False
 
-    # Stanger pygame snyggt nar programmet avslutas.
+    # Stänger pygame snyggt när programmet avslutas.
     pygame.quit()
 
 

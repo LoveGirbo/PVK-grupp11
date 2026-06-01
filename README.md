@@ -63,6 +63,7 @@ De flesta spelinställningar finns högst upp i `game.py`.
 Bra variabler att känna till:
 
 - `test_mode`: sätt till `True` om raketen alltid ska synas vid test.
+- `mouse_mode`: sätt till `True` om raketen ska styras med musen istället för rösten.
 - `max_notes`: antal noter per runda.
 - `piano_frequencies`: vilka noter som kan spawna som tonbalkar.
 - `VISIBLE_LOW_NOTE` / `VISIBLE_HIGH_NOTE`: vilket pianoregister som visas.
